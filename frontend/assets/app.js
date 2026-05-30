@@ -14,6 +14,7 @@ const state = {
   mapRenderTick: 0,
   rasterLayer: null,
   datasets: [],
+  variableMeta: new Map(),
   ragStatus: null,
   domain: "auto",        // current domain tab selection
   geoApiReady: false,    // whether geo-api (/geo-api/api/health) responded OK
@@ -326,9 +327,11 @@ function bindEvents() {
   els.syncBtn.addEventListener("click", syncFiles);
   els.askBtn.addEventListener("click", askAgent);
   els.reportClose.addEventListener("click", hideReportDock);
+  els.variable.addEventListener("change", handleVariableChange);
 
   els.renderModeGroup.querySelectorAll(".renderMode").forEach((btn) => {
     btn.addEventListener("click", () => {
+      if (btn.disabled) return;
       els.renderModeGroup.querySelectorAll(".renderMode").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.renderMode = btn.dataset.mode || "heatmap";
@@ -873,6 +876,7 @@ async function refreshRagStatus() {
 async function loadDatasets() {
   const data = await fetchJson("/api/ocean/datasets");
   state.datasets = data.datasets || [];
+  state.variableMeta = new Map();
   const options = [];
   for (const dataset of state.datasets) {
     for (const variable of dataset.variables || []) {
@@ -880,10 +884,74 @@ async function loadDatasets() {
         ? ` | ${dataset.resolution.lat}x${dataset.resolution.lon}°` : "";
       const step = variable.recommended_step || dataset.recommended_step || 1;
       const value = `${dataset.id}::${variable.name}`;
-      options.push(`<option value="${escapeAttr(value)}">${escapeHtml(dataset.id)} / ${escapeHtml(variable.name)} - ${escapeHtml(variable.long_name || variable.name)}${res} | step≥${step}</option>`);
+      const meta = { ...variable, dataset: dataset.id, dataset_resolution: dataset.resolution || {} };
+      state.variableMeta.set(value, meta);
+      const category = renderCategoryLabel(meta);
+      options.push(`<option value="${escapeAttr(value)}">${escapeHtml(dataset.id)} / ${escapeHtml(variable.name)} - ${escapeHtml(variable.long_name || variable.name)} | ${category}${res} | step≥${step}</option>`);
     }
   }
   els.variable.innerHTML = options.join("");
+  updateRenderModeAvailability();
+}
+
+function handleVariableChange() {
+  stopRenderAnimation();
+  state.grid = null;
+  clearGrid();
+  drawSelection();
+  updateRenderModeAvailability();
+  const meta = selectedVariableMeta();
+  els.oceanStatus.textContent = `已切换变量：${meta?.dataset || "-"} / ${meta?.long_name || meta?.name || "-"}。点击“渲染”后读取 NetCDF。`;
+  els.apiStatus.textContent = "接口：仅切换变量，尚未请求后端。";
+}
+
+function selectedVariableMeta() {
+  return state.variableMeta.get(els.variable.value) || null;
+}
+
+function renderCategoryLabel(meta) {
+  if (!meta) return "标量";
+  if (meta.category === "relief") return "地形/水深";
+  if (meta.category === "vector_component") return meta.particle_ready ? "矢量/粒子" : "矢量分量";
+  const text = `${meta.name || ""} ${meta.long_name || ""}`.toLowerCase();
+  if (text.includes("chlor")) return "叶绿素";
+  if (text.includes("salinity") || text.includes("sss")) return "盐度";
+  if (text.includes("sst") || text.includes("temperature")) return "温度";
+  if (text.includes("wave") || text.includes("swell")) return "海浪";
+  return "标量";
+}
+
+function allowedRenderModes(meta) {
+  const modes = meta?.render_modes?.length ? meta.render_modes : ["heatmap", "contour", "points"];
+  return new Set(modes);
+}
+
+function updateRenderModeAvailability() {
+  const meta = selectedVariableMeta();
+  const allowed = allowedRenderModes(meta);
+  if (!allowed.has(state.renderMode)) {
+    state.renderMode = "heatmap";
+  }
+  els.renderModeGroup.querySelectorAll(".renderMode").forEach((btn) => {
+    const mode = btn.dataset.mode || "heatmap";
+    const enabled = allowed.has(mode);
+    btn.disabled = !enabled;
+    btn.classList.toggle("active", mode === state.renderMode);
+    if (enabled) {
+      btn.title = {
+        heatmap: "连续填色栅格",
+        particles: "真实 u/v 矢量场粒子流",
+        contour: "等值线叠加",
+        points: "采样点符号图",
+      }[mode] || "";
+    } else if (mode === "particles") {
+      btn.title = meta?.vector_pair
+        ? "已识别到矢量分量；接入 u/v 联合查询后开放粒子流"
+        : "粒子流只对真实 u/v 风场或海流开放";
+    } else if (!enabled) {
+      btn.title = "当前变量不适合该渲染方式";
+    }
+  });
 }
 
 async function syncFiles() {
@@ -943,7 +1011,12 @@ async function queryOcean() {
     els.oceanStatus.textContent = "请先开启框选并选择一个区域。";
     return;
   }
+  updateRenderModeAvailability();
   const [dataset, variable] = els.variable.value.split("::");
+  if (!allowedRenderModes(selectedVariableMeta()).has(state.renderMode)) {
+    state.renderMode = "heatmap";
+    updateRenderModeAvailability();
+  }
   const step = Math.max(0, Number(els.stepInput.value || 0));
   const maxPoints = Math.max(100, Math.min(50000, Number(els.maxPointsInput.value || 9000)));
   els.oceanStatus.textContent = "正在读取 NetCDF 并生成区域栅格...";
@@ -1045,6 +1118,8 @@ function renderModeLabel(mode) {
 }
 
 function renderCanvas(data, width, height, mode) {
+  const allowed = allowedRenderModes(data);
+  if (!allowed.has(mode)) mode = "heatmap";
   if (mode === "particles") return particleCanvas(data, width, height);
   if (mode === "contour") return contourCanvas(data, width, height);
   if (mode === "points") return pointCanvas(data, width, height);
@@ -1066,7 +1141,7 @@ function gridCanvas(data, width, height) {
   for (let i = 0; i < rows; i++) {
     for (let j = 0; j < cols; j++) {
       const value = data.values[i][j];
-      if (value === null || Number.isNaN(value)) continue;
+      if (shouldSkipValue(data, value)) continue;
       ctx.fillStyle = color((value - min) / Math.max(1e-9, max - min));
       ctx.fillRect(j * cw, i * ch, Math.ceil(cw) + 1, Math.ceil(ch) + 1);
     }
@@ -1089,7 +1164,7 @@ function pointCanvas(data, width, height) {
   for (let i = 0; i < rows; i += skip) {
     for (let j = 0; j < cols; j += skip) {
       const value = data.values[i][j];
-      if (value === null || Number.isNaN(value)) continue;
+      if (shouldSkipValue(data, value)) continue;
       const t = normalizeValue(value, min, max);
       const x = ((j + 0.5) / Math.max(1, cols)) * width;
       const y = ((i + 0.5) / Math.max(1, rows)) * height;
@@ -1128,6 +1203,7 @@ function contourCanvas(data, width, height) {
         const v10 = data.values[i][j + 1];
         const v11 = data.values[i + 1]?.[j + 1];
         const v01 = data.values[i + 1]?.[j];
+        if ([v00, v10, v11, v01].some((v) => shouldSkipValue(data, v))) continue;
         const pts = marchingCell(v00, v10, v11, v01, level, j * cw, i * ch, cw, ch);
         for (let p = 0; p < pts.length; p += 2) {
           ctx.beginPath();
@@ -1258,6 +1334,11 @@ function marchingCell(v00, v10, v11, v01, level, x, y, w, h) {
 
 function normalizeValue(value, min, max) {
   return Math.max(0, Math.min(1, (value - min) / Math.max(1e-9, max - min)));
+}
+
+function shouldSkipValue(data, value) {
+  if (value === null || Number.isNaN(value)) return true;
+  return data?.land_mask === "positive" && value > 0;
 }
 
 function colorAlpha(t, alpha) {

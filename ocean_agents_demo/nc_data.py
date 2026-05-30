@@ -155,12 +155,17 @@ def query_grid(payload: dict[str, Any]) -> dict[str, Any]:
         grid.append(row)
     if not flat:
         raise ValueError("selected region has no valid ocean data")
+    units = var.attrs.get("units", "")
+    long_name = var.attrs.get("long_name", variable)
+    dim_names = [ds["dim_list"][dimid][0] for dimid in var.dimids]
+    render_meta = _variable_render_meta(path.stem, variable, units, long_name, dim_names, set(ds["variables"].keys()))
     return {
         "dataset": path.stem,
         "source": str(path),
         "variable": variable,
-        "units": var.attrs.get("units", ""),
-        "long_name": var.attrs.get("long_name", variable),
+        "units": units,
+        "long_name": long_name,
+        **render_meta,
         "bounds": {
             "west": min(west, east),
             "east": max(west, east),
@@ -375,6 +380,72 @@ def _recommended_step(lat_count: int, lon_count: int, max_points: int = 9000) ->
     return max(1, math.ceil(max(lat_count, lon_count) / target_side))
 
 
+def _variable_render_meta(
+    dataset_id: str,
+    name: str,
+    units: Any,
+    long_name: Any,
+    dims: list[str],
+    all_names: set[str],
+) -> dict[str, Any]:
+    text = f"{dataset_id} {name} {long_name} {units}".lower()
+    modes = ["heatmap", "contour", "points"]
+    category = "scalar"
+    land_mask = ""
+
+    if any(key in text for key in ("etopo", "elevation", "bathymetry", "bedrock", "topography")):
+        category = "relief"
+        land_mask = "positive"
+
+    role = _vector_role(name, text)
+    vector_pair = _vector_pair_name(name, role, all_names) if role else ""
+    if vector_pair:
+        category = "vector_component"
+        # Particle rendering needs both components read together. The UI keeps
+        # it disabled until the vector query path is explicitly implemented.
+        modes = ["heatmap", "contour", "points"]
+
+    return {
+        "category": category,
+        "render_modes": modes,
+        "land_mask": land_mask,
+        "vector_role": role,
+        "vector_pair": vector_pair,
+        "particle_ready": False,
+    }
+
+
+def _vector_role(name: str, text: str) -> str:
+    lower = name.lower()
+    if lower in {"u", "uo", "u10", "uwnd", "ugrd", "ugos", "water_u", "eastward_current", "eastward_wind"}:
+        return "u"
+    if lower in {"v", "vo", "v10", "vwnd", "vgrd", "vgos", "water_v", "northward_current", "northward_wind"}:
+        return "v"
+    if "eastward" in text or "zonal" in text:
+        return "u"
+    if "northward" in text or "meridional" in text:
+        return "v"
+    return ""
+
+
+def _vector_pair_name(name: str, role: str, all_names: set[str]) -> str:
+    if not role:
+        return ""
+    lower_to_name = {n.lower(): n for n in all_names}
+    pair_map = {
+        "u": ["v", "vo", "v10", "vwnd", "vgrd", "vgos", "water_v", "northward_current", "northward_wind"],
+        "v": ["u", "uo", "u10", "uwnd", "ugrd", "ugos", "water_u", "eastward_current", "eastward_wind"],
+    }
+    lower = name.lower()
+    candidates = [lower.replace("u", "v", 1)] if role == "u" and lower.startswith("u") else []
+    candidates += [lower.replace("v", "u", 1)] if role == "v" and lower.startswith("v") else []
+    candidates += pair_map[role]
+    for candidate in candidates:
+        if candidate in lower_to_name and lower_to_name[candidate] != name:
+            return lower_to_name[candidate]
+    return ""
+
+
 def _summary_netcdf4(path: Path) -> dict[str, Any]:
     from netCDF4 import Dataset
 
@@ -387,6 +458,7 @@ def _summary_netcdf4(path: Path) -> dict[str, Any]:
         lon_values = _to_float_list(nc.variables[lon_name][:])
         lat_dim = _coord_dim(nc.variables[lat_name], lat_name)
         lon_dim = _coord_dim(nc.variables[lon_name], lon_name)
+        all_names = set(nc.variables.keys())
         variables = []
         for name, var in nc.variables.items():
             lower = name.lower()
@@ -395,14 +467,17 @@ def _summary_netcdf4(path: Path) -> dict[str, Any]:
             dims = list(getattr(var, "dimensions", ()))
             if lat_dim not in dims or lon_dim not in dims:
                 continue
+            units = _jsonable(getattr(var, "units", ""))
+            long_name = _jsonable(getattr(var, "long_name", name))
             variables.append(
                 {
                     "name": name,
-                    "units": _jsonable(getattr(var, "units", "")),
-                    "long_name": _jsonable(getattr(var, "long_name", name)),
+                    "units": units,
+                    "long_name": long_name,
                     "dims": dims,
                     "shape": [int(size) for size in var.shape],
                     "recommended_step": _recommended_step(len(lat_values), len(lon_values)),
+                    **_variable_render_meta(path.stem, name, units, long_name, dims, all_names),
                 }
             )
         if not variables:
@@ -427,6 +502,7 @@ def _summary_classic(path: Path) -> dict[str, Any]:
     ds = _read_dataset(path)
     lat_name = _coord_name(ds, {"lat", "latitude"})
     lon_name = _coord_name(ds, {"lon", "longitude"})
+    all_names = set(ds["variables"].keys())
     variables = []
     for name, var in ds["variables"].items():
         if name in {lat_name, lon_name, "time", "depth", "altitude", "zlev"}:
@@ -434,14 +510,17 @@ def _summary_classic(path: Path) -> dict[str, Any]:
         if lat_name and lon_name and _var_has_coords(ds, var, lat_name, lon_name):
             dim_names = [ds["dim_list"][dimid][0] for dimid in var.dimids]
             dim_sizes = [ds["dim_list"][dimid][1] for dimid in var.dimids]
+            units = var.attrs.get("units", "")
+            long_name = var.attrs.get("long_name", name)
             variables.append(
                 {
                     "name": name,
-                    "units": var.attrs.get("units", ""),
-                    "long_name": var.attrs.get("long_name", name),
+                    "units": units,
+                    "long_name": long_name,
                     "dims": dim_names,
                     "shape": dim_sizes,
                     "recommended_step": _recommended_step(len(ds["variables"][lat_name].values), len(ds["variables"][lon_name].values)),
+                    **_variable_render_meta(path.stem, name, units, long_name, dim_names, all_names),
                 }
             )
     if not variables:
@@ -608,12 +687,16 @@ def _query_grid_netcdf4(
             grid.append(out_row)
         if not flat:
             raise ValueError("selected region has no valid ocean data")
+        units = _jsonable(getattr(var, "units", ""))
+        long_name = _jsonable(getattr(var, "long_name", variable))
+        render_meta = _variable_render_meta(path.stem, variable, units, long_name, dims, set(nc.variables.keys()))
         return {
             "dataset": path.stem,
             "source": str(path),
             "variable": variable,
-            "units": _jsonable(getattr(var, "units", "")),
-            "long_name": _jsonable(getattr(var, "long_name", variable)),
+            "units": units,
+            "long_name": long_name,
+            **render_meta,
             "bounds": {
                 "west": min(west, east),
                 "east": max(west, east),
