@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import json
 import math
 import os
@@ -13,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.getenv("OCEAN_DATA_DIR", ROOT / "data"))
 SAMPLE_NC = DATA_DIR / "sample_ocean.nc"
 NC_UPLOAD_DIR = DATA_DIR / "nc_uploads"
+LAND_MASK_NC = NC_UPLOAD_DIR / "etopo2022_taiwan_30s_bathy.nc"
+_LAND_MASK_CACHE: dict[str, Any] = {}
 
 NC_DIMENSION = 10
 NC_VARIABLE = 11
@@ -159,6 +162,11 @@ def query_grid(payload: dict[str, Any]) -> dict[str, Any]:
     long_name = var.attrs.get("long_name", variable)
     dim_names = [ds["dim_list"][dimid][0] for dimid in var.dimids]
     render_meta = _variable_render_meta(path.stem, variable, units, long_name, dim_names, set(ds["variables"].keys()))
+    lat_out = [float(lats[i]) for i in lat_idx]
+    lon_out = [float(lons[i]) for i in lon_idx]
+    grid, flat, masked_count = _apply_land_mask(path, render_meta, grid, lat_out, lon_out)
+    if not flat:
+        raise ValueError("selected region has no valid ocean data after land mask")
     return {
         "dataset": path.stem,
         "source": str(path),
@@ -172,9 +180,11 @@ def query_grid(payload: dict[str, Any]) -> dict[str, Any]:
             "south": min(south, north),
             "north": max(south, north),
         },
-        "lats": [round(lats[i], 4) for i in lat_idx],
-        "lons": [round(lons[i], 4) for i in lon_idx],
+        "lats": [round(x, 4) for x in lat_out],
+        "lons": [round(x, 4) for x in lon_out],
         "values": grid,
+        "land_mask_applied": masked_count,
+        "land_mask_source": str(LAND_MASK_NC) if masked_count else "",
         "step": stride,
         "requested_step": requested_step,
         "auto_step": auto_step,
@@ -603,6 +613,120 @@ def _value_is_missing(value: Any, fill_values: list[Any]) -> bool:
     return False
 
 
+def _apply_land_mask(
+    current_path: Path,
+    render_meta: dict[str, Any],
+    grid: list[list[float | None]],
+    lats: list[float],
+    lons: list[float],
+) -> tuple[list[list[float | None]], list[float], int]:
+    masked = 0
+    flat: list[float] = []
+    mask = _load_land_mask(current_path)
+    for i, row in enumerate(grid):
+        for j, value in enumerate(row):
+            if value is None:
+                continue
+            if render_meta.get("land_mask") == "positive" and value > 0:
+                row[j] = None
+                masked += 1
+                continue
+            if mask and _cell_overlaps_land(mask, lats, lons, i, j):
+                row[j] = None
+                masked += 1
+                continue
+            flat.append(float(value))
+    return grid, flat, masked
+
+
+def _load_land_mask(current_path: Path) -> dict[str, Any] | None:
+    if not LAND_MASK_NC.exists():
+        return None
+    key = str(LAND_MASK_NC)
+    if key in _LAND_MASK_CACHE:
+        return _LAND_MASK_CACHE[key]
+    try:
+        from netCDF4 import Dataset
+
+        with Dataset(LAND_MASK_NC) as nc:
+            lat_name = _find_nc_coord(nc, {"lat", "latitude"})
+            lon_name = _find_nc_coord(nc, {"lon", "longitude"})
+            var_name = "elevation" if "elevation" in nc.variables else "z"
+            if not lat_name or not lon_name or var_name not in nc.variables:
+                return None
+            values = nc.variables[var_name][:]
+            try:
+                values = values.filled(float("nan"))
+            except AttributeError:
+                pass
+            mask = {
+                "path": current_path,
+                "lats": _to_float_list(nc.variables[lat_name][:]),
+                "lons": _to_float_list(nc.variables[lon_name][:]),
+                "values": values.tolist() if hasattr(values, "tolist") else values,
+            }
+            _LAND_MASK_CACHE[key] = mask
+            return mask
+    except Exception:
+        return None
+
+
+def _is_land(mask: dict[str, Any], lat: float, lon: float) -> bool:
+    lats = mask["lats"]
+    lons = mask["lons"]
+    if not lats or not lons:
+        return False
+    if lat < min(lats) or lat > max(lats) or lon < min(lons) or lon > max(lons):
+        return False
+    i = _nearest_index(lats, lat)
+    j = _nearest_index(lons, lon)
+    try:
+        elevation = float(mask["values"][i][j])
+    except (TypeError, ValueError, IndexError):
+        return False
+    return math.isfinite(elevation) and elevation > 0
+
+
+def _cell_overlaps_land(mask: dict[str, Any], lats: list[float], lons: list[float], i: int, j: int) -> bool:
+    south, north = _axis_cell_bounds(lats, i)
+    west, east = _axis_cell_bounds(lons, j)
+    for lat in (south, (south + north) / 2, north):
+        for lon in (west, (west + east) / 2, east):
+            if _is_land(mask, lat, lon):
+                return True
+    return False
+
+
+def _axis_cell_bounds(values: list[float], index: int) -> tuple[float, float]:
+    value = values[index]
+    if len(values) == 1:
+        return value - 0.5, value + 0.5
+    if index == 0:
+        delta = abs(values[1] - value) / 2
+    elif index == len(values) - 1:
+        delta = abs(value - values[index - 1]) / 2
+    else:
+        delta = abs(values[index + 1] - values[index - 1]) / 4
+    return value - delta, value + delta
+
+
+def _nearest_index(values: list[float], target: float) -> int:
+    if len(values) == 1:
+        return 0
+    ascending = values[0] <= values[-1]
+    search_values = values if ascending else list(reversed(values))
+    pos = bisect.bisect_left(search_values, target)
+    if pos <= 0:
+        idx = 0
+    elif pos >= len(search_values):
+        idx = len(search_values) - 1
+    else:
+        before = search_values[pos - 1]
+        after = search_values[pos]
+        idx = pos - 1 if abs(target - before) <= abs(after - target) else pos
+    return idx if ascending else len(values) - 1 - idx
+
+
 def _query_grid_netcdf4(
     path: Path,
     variable: str,
@@ -690,6 +814,11 @@ def _query_grid_netcdf4(
         units = _jsonable(getattr(var, "units", ""))
         long_name = _jsonable(getattr(var, "long_name", variable))
         render_meta = _variable_render_meta(path.stem, variable, units, long_name, dims, set(nc.variables.keys()))
+        lat_out = [float(x) for x in lat_out]
+        lon_out = [float(x) for x in lon_out]
+        grid, flat, masked_count = _apply_land_mask(path, render_meta, grid, lat_out, lon_out)
+        if not flat:
+            raise ValueError("selected region has no valid ocean data after land mask")
         return {
             "dataset": path.stem,
             "source": str(path),
@@ -706,6 +835,8 @@ def _query_grid_netcdf4(
             "lats": [round(float(x), 4) for x in lat_out],
             "lons": [round(float(x), 4) for x in lon_out],
             "values": grid,
+            "land_mask_applied": masked_count,
+            "land_mask_source": str(LAND_MASK_NC) if masked_count else "",
             "step": step,
             "requested_step": requested_step,
             "auto_step": auto_step,
