@@ -1,0 +1,47 @@
+[
+  {
+    "id": "noaa-oa",
+    "title": "NOAA Ocean Acidification Overview",
+    "kind": "government_overview",
+    "year": 2026,
+    "source": "https://oceanacidification.noaa.gov/what-is-ocean-acidification/",
+    "topics": ["海洋酸化", "贝类", "珊瑚", "碳酸盐化学", "监测"],
+    "abstract": "海洋吸收二氧化碳后改变碳酸盐体系，使 pH 降低、碳酸根减少，削弱贝类、珊瑚等钙化生物形成壳体和骨骼的能力。近海酸化还受上升流、营养盐径流、藻华分解、温盐变化影响，治理需要结合长期监测、陆源污染控制、生态修复和减排。"
+  },
+  {
+    "id": "noaa-fisheries-oa",
+    "title": "NOAA Fisheries: Understanding Ocean Acidification",
+    "kind": "government_overview",
+    "year": 2026,
+    "source": "https://www.fisheries.noaa.gov/insight/understanding-ocean-acidification",
+    "topics": ["海洋酸化", "贝类养殖", "渔业", "食品安全"],
+    "abstract": "海洋酸化会影响牡蛎、蛤、龙虾、虾、珊瑚礁和翼足类等依赖碳酸钙结构的物种，并可能改变食物网关系。对社会层面而言，酸化会影响海产品供给、贝类养殖、沿海经济和有害藻华风险。"
+  },
+  {
+    "id": "mhw-global-warming",
+    "title": "Marine heatwaves under global warming",
+    "kind": "paper",
+    "year": 2018,
+    "source": "https://www.nature.com/articles/s41586-018-0383-9",
+    "topics": ["海洋热浪", "全球变暖", "珊瑚白化", "渔业", "生态风险"],
+    "abstract": "海洋热浪是持续数天到数月的异常高海表温度事件，会暴露海洋生态系统和渔业对极端温度事件的脆弱性，包括珊瑚白化、物种分布变化、食物网扰动和渔业生产风险。"
+  },
+  {
+    "id": "mhw-biodiversity",
+    "title": "Marine heatwaves threaten global biodiversity and ecosystem services",
+    "kind": "paper",
+    "year": 2019,
+    "source": "https://www.nature.com/articles/s41558-019-0412-1",
+    "topics": ["海洋热浪", "生物多样性", "生态系统服务", "珊瑚", "渔业"],
+    "abstract": "海洋热浪会威胁全球生物多样性和生态系统服务，对珊瑚、海草、海带等基础物种及相关生态过程造成破坏。规划需要结合生态敏感性、人类压力、渔业依赖度和保护优先区进行分区管理。"
+  },
+  {
+    "id": "ipcc-srocc",
+    "title": "IPCC SROCC Summary for Policymakers",
+    "kind": "assessment_report",
+    "year": 2019,
+    "source": "https://www.ipcc.ch/srocc/chapter/summary-for-policymakers/",
+    "topics": ["海洋与冰冻圈", "气候风险", "海平面", "适应", "治理"],
+    "abstract": "IPCC 海洋与冰冻圈特别报告综合评估海洋增暖、酸化、缺氧、海平面上升和极端事件对自然与人类系统的影响。沿海规划需要结合减排、适应、生态保护、灾害风险管理、监测预警和治理协同。"
+  }
+]

@@ -1,0 +1,82 @@
+"""GeoAgent 统一状态定义（LangGraph TypedDict）。
+
+所有节点读写同一个 GeoAgentState 实例，字段按流水线阶段分组。
+"""
+from __future__ import annotations
+
+from typing import Annotated, Any, Optional
+from typing_extensions import TypedDict
+
+
+def merge_trace(left: list[dict[str, Any]] | None, right: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Merge trace updates from sequential or parallel nodes without duplicating prefixes."""
+    if not left:
+        return list(right or [])
+    if not right:
+        return list(left)
+    merged = list(left)
+    if len(right) >= len(left) and right[:len(left)] == left:
+        merged.extend(right[len(left):])
+        return merged
+    for item in right:
+        if item not in merged:
+            merged.append(item)
+    return merged
+
+
+class TokenUsage(TypedDict, total=False):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+
+
+class BBox(TypedDict, total=False):
+    west: float
+    east: float
+    south: float
+    north: float
+
+
+class GeoAgentState(TypedDict, total=False):
+    # ── 输入 ──────────────────────────────────────────────────
+    question: str
+    bbox: Optional[BBox]
+    variables: list[str]          # 用户指定的 NC 变量名
+    backend: str                  # "auto" | "local" | "ragflow"
+    top_k: int
+    threshold: float
+    max_revisions: int
+    trace_enabled: bool
+
+    # ── 意图解析（IntentNode） ─────────────────────────────────
+    domain: str                   # "marine" | "stargazing" | "biology" | "navigation" | "general"
+    intent: dict[str, Any]        # topics / keywords / queries / intent_type
+
+    # ── 检索层（RetrievalNode + ContextNode，可并行） ──────────
+    candidates: list[dict[str, Any]]   # 候选文档（Doc 序列化为 dict）
+    backend_used: str
+    ocean_data: dict[str, Any]         # NetCDF 区域统计
+
+    # ── 筛选层（ScreeningNode） ───────────────────────────────
+    kept_docs: list[dict[str, Any]]
+    passed_docs: list[dict[str, Any]]
+    screening_decisions: list[dict[str, Any]]
+
+    # ── 领域推理（ReasoningNode） ─────────────────────────────
+    domain_analysis: dict[str, Any]   # 各领域分析结果
+    risk_hypotheses: list[dict[str, Any]]
+
+    # ── 报告生成（ReportNode） ────────────────────────────────
+    report: str
+    revisions: int
+
+    # ── 质量审查（CriticNode） ────────────────────────────────
+    critic_result: dict[str, Any]   # passed / issues / feedback
+
+    # ── 元信息 ────────────────────────────────────────────────
+    task_id: str
+    elapsed_ms: float
+    token_usage: TokenUsage
+    trace: Annotated[list[dict[str, Any]], merge_trace]
+    errors: list[str]

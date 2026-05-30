@@ -1,0 +1,80 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ocean-demo-backend
+    environment:
+      OCEAN_DATA_DIR: /app/data
+      OCEAN_INSTANCE_DIR: /app/instance
+      GEOSERVER_PUBLIC_URL: /geoserver
+      GEOSERVER_INTERNAL_URL: http://geoserver:8080/geoserver
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      RAGFLOW_BASE_URL: ${RAGFLOW_BASE_URL:-http://host.docker.internal:9380}
+      RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:-}
+      RAGFLOW_DATASET_IDS: ${RAGFLOW_DATASET_IDS:-}
+    volumes:
+      - ./data:/app/data
+      - ./instance:/app/instance
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "5000"
+    restart: unless-stopped
+
+  # ── GeoAgent v2 API（新架构，SSE流式 + 4领域） ─────────────────────────
+  geo-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ocean-geo-api
+    command: ["python", "/app/geo_api.py"]
+    environment:
+      OCEAN_DATA_DIR: /app/data
+      PORT: "5001"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      RAGFLOW_BASE_URL: ${RAGFLOW_BASE_URL:-http://host.docker.internal:9380}
+      RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:-}
+      RAGFLOW_DATASET_IDS: ${RAGFLOW_DATASET_IDS:-}
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "5001:5001"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ocean-demo-nginx
+    depends_on:
+      - backend
+      - geo-api
+      - geoserver
+    ports:
+      - "8000:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+  geoserver:
+    image: docker.osgeo.org/geoserver:3.0.x
+    container_name: ocean-demo-geoserver
+    environment:
+      INSTALL_EXTENSIONS: "true"
+      STABLE_EXTENSIONS: "netcdf"
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./geoserver_data:/opt/geoserver_data
+      - ./data/geoserver_upload:/opt/geoserver_data/import
+    restart: unless-stopped
+
+networks:
+  default:
+    name: ocean-demo-net

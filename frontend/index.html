@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ocean Digital Earth RAG Demo</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/Widgets/widgets.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.3.1/ol.css">
+  <link rel="stylesheet" href="/assets/app.css?v=20260530-ui2">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brandMark" aria-hidden="true"></span>
+      <div>
+        <h1>海洋数字地球</h1>
+        <p id="health">服务状态检查中...</p>
+      </div>
+    </div>
+    <nav class="systemLinks">
+      <a href="/geoserver/web/" target="_blank" rel="noreferrer">GeoServer</a>
+      <a href="/api/health" target="_blank" rel="noreferrer">API</a>
+      <button id="chatToggle" class="iconButton aiMini" title="AI 助手"><span>AI</span></button>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section class="earthStage">
+      <div id="earth"></div>
+      <div class="reticle" aria-hidden="true"></div>
+    </section>
+
+    <aside class="toolPanel">
+      <div class="panelHeader">
+        <div>
+          <span class="eyebrow">OCEAN LAYERS</span>
+          <h2>要素控制</h2>
+        </div>
+        <button id="syncBtn" class="iconButton syncButton" title="同步本地 NC/PDF">↻</button>
+      </div>
+
+      <section class="deckBlock">
+        <label for="variable">数据集 / 变量</label>
+        <select id="variable"></select>
+        <div class="renderModeGroup" id="renderModeGroup" aria-label="渲染方式">
+          <button class="renderMode active" data-mode="heatmap" title="连续填色栅格">填色</button>
+          <button class="renderMode" data-mode="particles" title="基于数值梯度的流动粒子效果">粒子</button>
+          <button class="renderMode" data-mode="contour" title="等值线叠加">等值线</button>
+          <button class="renderMode" data-mode="points" title="采样点符号图">点图</button>
+        </div>
+        <div class="actionBar">
+          <button id="selectBtn" class="toolButton secondary">框选</button>
+          <button id="queryBtn" class="toolButton primary">渲染</button>
+          <button id="clearBtn" class="toolButton secondary">清除</button>
+        </div>
+        <div class="controlGrid">
+          <label>
+            步长
+            <input id="stepInput" type="number" min="0" max="1000" value="0">
+          </label>
+          <label>
+            格点上限
+            <input id="maxPointsInput" type="number" min="100" max="50000" step="100" value="9000">
+          </label>
+        </div>
+      </section>
+
+      <section class="deckBlock statusBlock">
+        <p id="oceanStatus">地球可旋转浏览；开启框选后在地球上拖拽选择区域。</p>
+        <p id="apiStatus" class="apiStatus">接口：等待请求。</p>
+      </section>
+
+      <section class="deckBlock">
+        <div class="sectionTitle">区域统计</div>
+        <div class="stats" id="stats"></div>
+      </section>
+    </aside>
+
+    <div class="mapDock">
+      <div class="mapHeader">
+        <span>二维定位</span>
+        <span id="vmin">-</span>
+        <div class="legendBar"></div>
+        <span id="vmax">-</span>
+      </div>
+      <div id="map"></div>
+    </div>
+
+    <section id="reportDock" class="reportDock" aria-live="polite">
+      <div class="reportDockHeader">
+        <div>
+          <span class="eyebrow">AI REPORT</span>
+          <h2>报告阅读</h2>
+          <p id="reportMeta">等待生成。</p>
+        </div>
+        <button id="reportClose" class="iconButton" title="收起报告">×</button>
+      </div>
+      <article id="reportBody" class="reportBody"></article>
+    </section>
+  </main>
+
+  <button id="chatFab" class="chatFab" title="打开 AI 助手">
+    <span class="aiRing" aria-hidden="true"></span>
+    <span class="aiGlyph">AI</span>
+  </button>
+
+  <button id="reportFab" class="reportFab" title="打开报告阅读">
+    <span>报告</span>
+  </button>
+
+  <aside id="chatDrawer" class="chatDrawer">
+    <div class="chatHeader">
+      <div>
+        <span class="eyebrow">MARINE INTELLIGENCE</span>
+        <h2>海洋智能助手</h2>
+        <p id="reportStatus">等待提问。</p>
+      </div>
+      <div class="chatHeaderRight">
+        <!-- GeoAgent 在线指示 -->
+        <span class="geoTag" id="geoTag" title="GeoAgent 状态">GEO</span>
+        <button id="chatClose" class="iconButton" title="关闭">×</button>
+      </div>
+    </div>
+
+    <div id="chatMessages" class="chatMessages">
+      <div class="message ai">可以询问海洋热浪、酸化、渔业风险，也可以结合当前框选区域生成规划建议。框选区域后 AI 会自动获取该海域数据。</div>
+    </div>
+
+    <div class="agentPanel">
+      <div id="agentSummary" class="agentSummary"></div>
+      <div id="agentTrace" class="agentTrace"></div>
+      <div id="docs" class="evidence"></div>
+    </div>
+
+    <div class="chatControls">
+
+      <!-- ① 领域选择 Tab -->
+      <div class="domainTabs" id="domainTabs">
+        <button class="domTab active" data-domain="auto" title="根据问题自动判断领域">🔮 自动</button>
+        <button class="domTab" data-domain="marine"     title="海表温度、盐度、叶绿素等要素">🌊 海洋</button>
+        <button class="domTab" data-domain="stargazing" title="月相、光污染、云量观星分析">🌟 观星</button>
+        <button class="domTab" data-domain="biology"    title="珊瑚白化、赤潮、栖息地">🐠 生物</button>
+        <button class="domTab" data-domain="navigation" title="浪高、风级、航行安全">⚓ 航行</button>
+      </div>
+
+      <!-- ② 快捷问题建议 -->
+      <div class="suggRow" id="suggRow"></div>
+
+      <!-- ③ 问题输入 -->
+      <textarea id="question">请结合海表温度和海洋热浪知识，评估目标海域对珊瑚礁和渔业的风险，并形成规划建议</textarea>
+
+      <!-- ④ 流水线进度条（流式时可见） -->
+      <div class="pipelineBar" id="pipelineBar">
+        <span class="pStep" id="ps-intent">意图</span>
+        <span class="pArrow">›</span>
+        <span class="pStep" id="ps-retrieval">检索</span>
+        <span class="pArrow">›</span>
+        <span class="pStep" id="ps-context">数据</span>
+        <span class="pArrow">›</span>
+        <span class="pStep" id="ps-reasoning">推理</span>
+        <span class="pArrow">›</span>
+        <span class="pStep" id="ps-report">报告</span>
+      </div>
+
+      <!-- ⑤ 高级选项（旧版API备用，折叠） -->
+      <details class="advOpts" id="advOpts">
+        <summary>高级选项（旧版 RAG API）</summary>
+        <div class="row">
+          <select id="backend">
+            <option>auto</option>
+            <option>local</option>
+            <option>ragflow</option>
+          </select>
+          <input id="topk" type="number" min="1" max="12" value="6">
+        </div>
+      </details>
+
+      <button id="askBtn">发送</button>
+      <button id="chatClear" class="secondary">清空对话</button>
+    </div>
+  </aside>
+
+  <script src="https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/Cesium.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ol@10.3.1/dist/ol.js"></script>
+  <script src="/assets/app.js?v=20260530-restore1"></script>
+</body>
+</html>

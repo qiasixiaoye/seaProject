@@ -1,0 +1,10 @@
+{"id": "q1", "question": "海洋热浪对珊瑚礁和渔业有什么影响，如何应对？", "expected_keywords": ["海洋热浪", "热浪", "珊瑚", "渔业"], "expect_topics": ["海洋热浪", "珊瑚", "渔业"]}
+{"id": "q2", "question": "海洋酸化如何影响贝类养殖和食品安全？", "expected_keywords": ["酸化", "贝类", "养殖"], "expect_topics": ["海洋酸化", "贝类"]}
+{"id": "q3", "question": "海平面上升带来的气候风险与适应治理路径？", "expected_keywords": ["海平面", "适应", "治理", "气候"], "expect_topics": ["海平面"]}
+{"id": "q4", "question": "中国近岸海域环境质量总体状况如何？", "expected_keywords": ["近岸海域", "环境质量", "海洋生态"], "expect_topics": ["近岸海域", "环境质量"]}
+{"id": "q5", "question": "海洋灾害（风暴潮、海浪）的主要风险有哪些？", "expected_keywords": ["海洋灾害", "灾害", "海浪", "风暴潮"], "expect_topics": ["海洋灾害"]}
+{"id": "q6", "question": "全球变暖背景下海洋生物多样性与生态系统服务面临哪些威胁？", "expected_keywords": ["生物多样性", "生态系统服务", "海洋热浪", "珊瑚"], "expect_topics": ["生物多样性", "生态系统服务"]}
+{"id": "q7", "question": "IPCC 对海洋与冰冻圈变化的主要结论和治理建议是什么？", "expected_keywords": ["冰冻圈", "气候风险", "海平面", "治理", "适应"], "expect_topics": ["气候风险"]}
+{"id": "q8", "question": "有哪些海表温度（SST）及其极端变化的监测/再分析产品？", "expected_keywords": ["sst", "temperature", "sea surface", "extreme"], "expect_topics": ["sst"]}
+{"id": "q9", "question": "有效波高极值与近岸强浪事件的相关数据产品？", "expected_keywords": ["wave", "significant wave height", "swell"], "expect_topics": ["wave"]}
+{"id": "q10", "question": "海洋碳观测与生物地球化学（BGC）相关产品有哪些？", "expected_keywords": ["carbon", "bgc", "biogeochemical", "in situ"], "expect_topics": ["bgc"]}

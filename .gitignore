@@ -1,0 +1,30 @@
+.env
+*.pyc
+__pycache__/
+instance/
+logs/
+geoserver_data/
+artifacts/
+backups/
+ragflow_official/
+ragflow_stack/**/mysql_data/
+ragflow_stack/**/minio_data/
+ragflow_stack/**/esdata*/
+文档下载+nc下载/
+server.err.log
+server.out.log
+
+# 个人/敏感文件（简历含个人信息，切勿入库）
+简历.pdf
+*.resume.pdf
+
+# IDE 配置
+.idea/
+
+# 大体积下载语料：保留目录与 .gitkeep，忽略 PDF 正文（700MB+）
+data/pdf_reports/**/*.pdf
+data/pdf_reports/*.pdf
+data/nc_uploads/*.nc
+
+# Cowork 临时目录
+seaProject/

@@ -1,0 +1,15 @@
+Flask==3.0.3
+flask-cors==4.0.1
+gunicorn==22.0.0
+netCDF4==1.7.2
+numpy==2.1.3
+pypdf==5.9.0
+
+# GeoAgent v2 新增依赖
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+typing_extensions>=4.9.0
+
+# 可选（用于更精确的天文计算，不安装不影响运行）
+# ephem>=4.1.5

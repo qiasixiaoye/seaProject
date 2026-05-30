@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GeoAgent — 海洋智能分析</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0e1a;
+      --surface: #111827;
+      --surface2: #1a2235;
+      --border: #1e2d45;
+      --accent: #3b82f6;
+      --accent2: #06b6d4;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --text: #e2e8f0;
+      --text-dim: #64748b;
+      --text-mid: #94a3b8;
+      --radius: 10px;
+      --font: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 56px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .brand h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+    .brand p { font-size: 11px; color: var(--text-dim); }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--text-dim);
+    }
+    .status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    #statusText { font-size: 12px; color: var(--text-mid); }
+    .link-btn {
+      font-size: 12px; color: var(--text-mid); text-decoration: none;
+      padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px;
+    }
+    .link-btn:hover { color: var(--text); border-color: var(--accent); }
+
+    /* ── Main layout ── */
+    main {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      flex: 1;
+      overflow: hidden;
+      height: calc(100vh - 56px);
+    }
+
+    /* ── Left panel ── */
+    .left-panel {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 10px;
+    }
+
+    /* Domain selector */
+    .domain-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .domain-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 10px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface2);
+      color: var(--text-mid);
+      cursor: pointer;
+      transition: all 0.15s;
+      font-size: 11px;
+      font-family: var(--font);
+    }
+    .domain-btn .icon { font-size: 20px; }
+    .domain-btn:hover { border-color: var(--accent); color: var(--text); }
+    .domain-btn.active {
+      border-color: var(--accent);
+      background: rgba(59,130,246,0.12);
+      color: var(--text);
+    }
+    .domain-btn.active .icon { filter: drop-shadow(0 0 6px var(--accent)); }
+
+    /* Bbox inputs */
+    .bbox-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .field label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .field input {
+      width: 100%;
+      padding: 6px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: var(--font);
+    }
+    .field input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    /* Question */
+    textarea#question {
+      width: 100%;
+      padding: 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 13px;
+      font-family: var(--font);
+      resize: vertical;
+      min-height: 90px;
+      line-height: 1.5;
+    }
+    textarea#question:focus { outline: none; border-color: var(--accent); }
+
+    .ask-btn {
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .ask-btn:hover:not(:disabled) { background: #2563eb; }
+    .ask-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Token usage */
+    .token-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+    .token-row span { color: var(--text-mid); }
+
+    /* Suggestions */
+    .suggestion-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip {
+      padding: 4px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 11px;
+      color: var(--text-mid);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .chip:hover { border-color: var(--accent2); color: var(--text); }
+
+    /* ── Right panel: stream output ── */
+    .right-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    .output-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .output-title { font-size: 14px; font-weight: 600; }
+    .badge {
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .badge-blue { background: rgba(59,130,246,0.15); color: var(--accent); }
+    .badge-green { background: rgba(16,185,129,0.15); color: var(--green); }
+    .badge-yellow { background: rgba(245,158,11,0.15); color: var(--yellow); }
+    .badge-gray { background: rgba(100,116,139,0.15); color: var(--text-dim); }
+    #domainBadge { display: none; }
+
+    .output-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Pipeline steps */
+    .pipeline {
+      display: flex;
+      gap: 0;
+      margin-bottom: 4px;
+    }
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-dim);
+      position: relative;
+    }
+    .step + .step::before {
+      content: '→';
+      margin: 0 8px;
+      color: var(--border);
+    }
+    .step.done { color: var(--green); }
+    .step.active { color: var(--accent); }
+    .step.active .step-dot { animation: pulse 1s infinite; }
+    .step-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* Stream cards */
+    .stream-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .stream-card-header {
+      padding: 8px 14px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-mid);
+    }
+    .stream-card-body {
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Report output */
+    #reportCard {
+      display: none;
+    }
+    #reportCard .stream-card-body {
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    /* Cursor blink */
+    .cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1em;
+      background: var(--accent);
+      margin-left: 2px;
+      animation: blink 0.8s steps(1) infinite;
+      vertical-align: text-bottom;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* Empty state */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: var(--text-dim);
+    }
+    .empty-icon { font-size: 48px; opacity: 0.4; }
+    .empty-state p { font-size: 14px; }
+    .empty-state small { font-size: 12px; opacity: 0.6; }
+
+    /* Error */
+    .error-card {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #fca5a5;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-icon">🌊</div>
+    <div>
+      <h1>GeoAgent 海洋智能分析</h1>
+      <p>LangGraph · 四领域 · SSE流式</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">连接中...</span>
+    <a class="link-btn" href="/" target="_blank">← 主系统</a>
+    <a class="link-btn" href="/geo-api/api/geo/domains" target="_blank">API</a>
+  </div>
+</header>
+
+<main>
+  <!-- Left Panel -->
+  <div class="left-panel">
+
+    <div class="panel-section">
+      <div class="section-label">分析领域</div>
+      <div class="domain-grid">
+        <button class="domain-btn active" data-domain="marine">
+          <span class="icon">🌊</span>海洋要素
+        </button>
+        <button class="domain-btn" data-domain="stargazing">
+          <span class="icon">🌟</span>观星分析
+        </button>
+        <button class="domain-btn" data-domain="biology">
+          <span class="icon">🐠</span>海洋生物
+        </button>
+        <button class="domain-btn" data-domain="navigation">
+          <span class="icon">⚓</span>航行安全
+        </button>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-label">地理范围（经纬度）</div>
+      <div class="bbox-grid">
+        <div class="field">
+          <label>西边界（lon W）</label>
+          <input type="number" id="bboxWest" value="119" step="0.5">
+        </div>
+        <div class="field">
+          <label>东边界（lon E）</label>
+          <input type="number" id="bboxEast" value="122" step="0.5">
+        </div>
+        <div class="field">
+          <label>南边界（lat S）</label>
+          <input type="number" id="bboxSouth" value="23" step="0.5">
+        </div>
+        <div class="field">
+          <label>北边界（lat N）</label>
+          <input type="number" id="bboxNorth" value="26" step="0.5">
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section" style="flex:1; display:flex; flex-direction:column; gap:10px;">
+      <div class="section-label">问题</div>
+      <textarea id="question" placeholder="输入你的海洋相关问题..."></textarea>
+
+      <div class="suggestion-chips" id="chips"></div>
+
+      <button class="ask-btn" id="askBtn" onclick="startQuery()">🚀 开始分析</button>
+
+      <div>
+        <div class="token-row">
+          <span>Token 用量</span>
+          <span id="tokenIn">输入: —</span>
+        </div>
+        <div class="token-row">
+          <span>估算费用</span>
+          <span id="tokenCost">— USD</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right Panel -->
+  <div class="right-panel">
+    <div class="output-header">
+      <span class="output-title">分析输出</span>
+      <span class="badge badge-gray" id="domainBadge">—</span>
+      <span style="flex:1"></span>
+      <!-- Pipeline steps -->
+      <div class="pipeline" id="pipeline">
+        <div class="step" id="s-intent"><span class="step-dot"></span>意图解析</div>
+        <div class="step" id="s-retrieval"><span class="step-dot"></span>检索</div>
+        <div class="step" id="s-context"><span class="step-dot"></span>数据获取</div>
+        <div class="step" id="s-reasoning"><span class="step-dot"></span>推理分析</div>
+        <div class="step" id="s-report"><span class="step-dot"></span>报告生成</div>
+      </div>
+    </div>
+
+    <div class="output-body" id="outputBody">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">🌐</div>
+        <p>选择领域，输入问题，开始分析</p>
+        <small>支持：海洋要素 · 观星适宜性 · 海洋生物 · 航行安全</small>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const DOMAIN_INFO = {
+  marine:     { label: '海洋要素', icon: '🌊', color: 'badge-blue',
+    questions: ['台湾海峡海表温度异常情况如何？', '这片海域叶绿素浓度偏高吗？', '目前海表盐度是否正常？'] },
+  stargazing: { label: '观星分析', icon: '🌟', color: 'badge-yellow',
+    questions: ['今晚台湾东部适合观星吗？', '这片海域光污染程度如何？', '当前月相是否影响观星？'] },
+  biology:    { label: '海洋生物', icon: '🐠', color: 'badge-green',
+    questions: ['这片海域有珊瑚白化风险吗？', '目前是否有赤潮（有害藻华）风险？', '这片海域适合哪些鱼类栖息？'] },
+  navigation: { label: '航行安全', icon: '⚓', color: 'badge-blue',
+    questions: ['台湾海峡适合小型渔船出海吗？', '当前海况对集装箱船只安全吗？', '近期浪高和风级评估如何？'] },
+};
+
+let currentDomain = 'marine';
+let es = null; // EventSource
+
+// Domain button switching
+document.querySelectorAll('.domain-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.domain-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentDomain = btn.dataset.domain;
+    renderChips();
+  });
+});
+
+function renderChips() {
+  const chips = document.getElementById('chips');
+  const q = DOMAIN_INFO[currentDomain].questions;
+  chips.innerHTML = q.map(s =>
+    `<span class="chip" onclick="setQuestion(this.textContent)">${s}</span>`
+  ).join('');
+}
+renderChips();
+
+function setQuestion(q) {
+  document.getElementById('question').value = q;
+}
+
+// Health check
+async function checkHealth() {
+  try {
+    const r = await fetch('/geo-api/api/health');
+    const d = await r.json();
+    document.getElementById('statusDot').className = 'status-dot online';
+    const llm = d.llm?.configured ? d.llm.model : '未配置LLM';
+    document.getElementById('statusText').textContent = `在线 · ${llm}`;
+  } catch {
+    document.getElementById('statusDot').className = 'status-dot';
+    document.getElementById('statusText').textContent = 'geo-api 未连接';
+  }
+}
+checkHealth();
+
+// Pipeline step helpers
+function setStep(id, state) {
+  // state: 'active' | 'done' | ''
+  const el = document.getElementById('s-' + id);
+  if (!el) return;
+  el.className = 'step ' + state;
+}
+function resetSteps() {
+  ['intent','retrieval','context','reasoning','report'].forEach(s => setStep(s, ''));
+}
+
+// Output helpers
+function clearOutput() {
+  const body = document.getElementById('outputBody');
+  body.innerHTML = '';
+  document.getElementById('domainBadge').style.display = 'none';
+}
+
+function addCard(id, title, icon) {
+  const body = document.getElementById('outputBody');
+  const card = document.createElement('div');
+  card.className = 'stream-card';
+  card.id = id;
+  card.innerHTML = `
+    <div class="stream-card-header">${icon} ${title}</div>
+    <div class="stream-card-body" id="${id}-body"></div>
+  `;
+  body.appendChild(card);
+  return card;
+}
+
+function appendToCard(id, text) {
+  const el = document.getElementById(id + '-body');
+  if (!el) return;
+  // Remove cursor if exists
+  const cur = el.querySelector('.cursor');
+  if (cur) cur.remove();
+  el.textContent += text;
+  // Re-add cursor
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor';
+  el.appendChild(cursor);
+  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function finalizeCard(id) {
+  const el = document.getElementById(id + '-body');
+  if (!el) return;
+  const cur = el.querySelector('.cursor');
+  if (cur) cur.remove();
+}
+
+// Main query
+function startQuery() {
+  const question = document.getElementById('question').value.trim();
+  if (!question) { alert('请输入问题'); return; }
+
+  const bbox = {
+    west:  parseFloat(document.getElementById('bboxWest').value),
+    east:  parseFloat(document.getElementById('bboxEast').value),
+    south: parseFloat(document.getElementById('bboxSouth').value),
+    north: parseFloat(document.getElementById('bboxNorth').value),
+  };
+
+  // UI reset
+  clearOutput();
+  resetSteps();
+  document.getElementById('emptyState') && document.getElementById('emptyState').remove();
+  document.getElementById('askBtn').disabled = true;
+  document.getElementById('askBtn').textContent = '分析中...';
+
+  // Domain badge
+  const info = DOMAIN_INFO[currentDomain];
+  const badge = document.getElementById('domainBadge');
+  badge.className = 'badge ' + info.color;
+  badge.textContent = info.icon + ' ' + info.label;
+  badge.style.display = '';
+
+  // Close previous SSE
+  if (es) { es.close(); es = null; }
+
+  // Build URL with params
+  const params = new URLSearchParams({
+    question,
+    domain: currentDomain,
+    bbox: JSON.stringify(bbox),
+  });
+  es = new EventSource(`/geo-api/api/geo/stream?${params}`);
+
+  let intentCard = null, reportCard = null;
+
+  es.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+
+    const type = msg.type;
+
+    if (type === 'domain') {
+      setStep('intent', 'active');
+    }
+    else if (type === 'intent') {
+      setStep('intent', 'done');
+      setStep('retrieval', 'active');
+      setStep('context', 'active');
+      if (!intentCard) {
+        intentCard = addCard('intent-card', '意图解析', '🔍');
+        const d = msg.data || {};
+        document.getElementById('intent-card-body').textContent =
+          `领域：${d.domain || currentDomain}\n` +
+          `类型：${d.intent_type || '—'}\n` +
+          `主题：${(d.topics || []).join('、') || '—'}\n` +
+          `检索词：${(d.keywords || []).join(' ') || '—'}`;
+      }
+    }
+    else if (type === 'context') {
+      setStep('context', 'done');
+      setStep('retrieval', 'done');
+      setStep('reasoning', 'active');
+      if (msg.data) {
+        const ctxCard = addCard('ctx-card', '海洋数据摘要', '📊');
+        const vars = msg.data.variables_queried || [];
+        const stats = msg.data.stats || {};
+        let text = vars.length ? `已查询变量：${vars.join(', ')}\n` : '无可用NC数据（将使用知识库推断）\n';
+        Object.entries(stats).slice(0, 5).forEach(([k, v]) => {
+          text += `${k}：均值=${v.mean?.toFixed(3) ?? '—'}\n`;
+        });
+        document.getElementById('ctx-card-body').textContent = text.trim();
+      }
+    }
+    else if (type === 'analysis') {
+      setStep('reasoning', 'done');
+      setStep('report', 'active');
+      if (msg.data) {
+        const anaCard = addCard('ana-card', '领域推理结果', '🧠');
+        const body = document.getElementById('ana-card-body');
+        body.textContent = JSON.stringify(msg.data, null, 2).slice(0, 800) +
+          (JSON.stringify(msg.data).length > 800 ? '\n...' : '');
+      }
+    }
+    else if (type === 'token') {
+      if (!reportCard) {
+        reportCard = addCard('report-card', '分析报告', '📄');
+      }
+      appendToCard('report-card', msg.data || '');
+    }
+    else if (type === 'revision') {
+      const revCard = addCard('rev-card-' + Date.now(), '🔄 Critic 修订中...', '✏️');
+    }
+    else if (type === 'done') {
+      setStep('report', 'done');
+      finalizeCard('report-card');
+      document.getElementById('askBtn').disabled = false;
+      document.getElementById('askBtn').textContent = '🚀 开始分析';
+      es.close(); es = null;
+      // Token usage
+      if (msg.usage) {
+        const u = msg.usage;
+        document.getElementById('tokenIn').textContent =
+          `输入:${u.input_tokens||0} 输出:${u.output_tokens||0}`;
+        document.getElementById('tokenCost').textContent =
+          `≈$${(u.estimated_cost_usd||0).toFixed(5)}`;
+      }
+      fetchTokenUsage();
+    }
+    else if (type === 'error') {
+      const errDiv = document.createElement('div');
+      errDiv.className = 'error-card';
+      errDiv.textContent = '❌ ' + (msg.message || '未知错误');
+      document.getElementById('outputBody').appendChild(errDiv);
+      setStep('report', '');
+      document.getElementById('askBtn').disabled = false;
+      document.getElementById('askBtn').textContent = '🚀 开始分析';
+      es.close(); es = null;
+    }
+  };
+
+  es.onerror = () => {
+    document.getElementById('askBtn').disabled = false;
+    document.getElementById('askBtn').textContent = '🚀 开始分析';
+    const errDiv = document.createElement('div');
+    errDiv.className = 'error-card';
+    errDiv.textContent = '❌ 连接 geo-api 失败，请确认服务已启动（port 5001）';
+    document.getElementById('outputBody').appendChild(errDiv);
+    if (es) { es.close(); es = null; }
+  };
+}
+
+async function fetchTokenUsage() {
+  try {
+    const r = await fetch('/geo-api/api/geo/token-usage');
+    const d = await r.json();
+    if (d.input_tokens != null) {
+      document.getElementById('tokenIn').textContent =
+        `输入:${d.input_tokens} 输出:${d.output_tokens}`;
+      document.getElementById('tokenCost').textContent =
+        `≈$${(d.estimated_cost_usd||0).toFixed(5)}`;
+    }
+  } catch {}
+}
+
+// Enter key shortcut
+document.getElementById('question').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) startQuery();
+});
+</script>
+</body>
+</html>

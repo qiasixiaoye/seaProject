@@ -1,0 +1,135 @@
+{
+  "summary": {
+    "n": 10,
+    "backend": "local",
+    "llm_configured": false,
+    "retrieval_hit_rate": 0.9,
+    "avg_topic_recall": 0.9,
+    "avg_citation_coverage": 0.9,
+    "avg_revisions": 0,
+    "avg_latency_ms": 7.82,
+    "avg_groundedness": null
+  },
+  "results": [
+    {
+      "id": "q1",
+      "question": "海洋热浪对珊瑚礁和渔业有什么影响，如何应对？",
+      "kept": 3,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 31.0,
+      "groundedness": null
+    },
+    {
+      "id": "q2",
+      "question": "海洋酸化如何影响贝类养殖和食品安全？",
+      "kept": 3,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 5.0,
+      "groundedness": null
+    },
+    {
+      "id": "q3",
+      "question": "海平面上升带来的气候风险与适应治理路径？",
+      "kept": 1,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 5.5,
+      "groundedness": null
+    },
+    {
+      "id": "q4",
+      "question": "中国近岸海域环境质量总体状况如何？",
+      "kept": 6,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 5.7,
+      "groundedness": null
+    },
+    {
+      "id": "q5",
+      "question": "海洋灾害（风暴潮、海浪）的主要风险有哪些？",
+      "kept": 4,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 5.5,
+      "groundedness": null
+    },
+    {
+      "id": "q6",
+      "question": "全球变暖背景下海洋生物多样性与生态系统服务面临哪些威胁？",
+      "kept": 3,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 5.6,
+      "groundedness": null
+    },
+    {
+      "id": "q7",
+      "question": "IPCC 对海洋与冰冻圈变化的主要结论和治理建议是什么？",
+      "kept": 1,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 5.3,
+      "groundedness": null
+    },
+    {
+      "id": "q8",
+      "question": "有哪些海表温度（SST）及其极端变化的监测/再分析产品？",
+      "kept": 6,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 4.9,
+      "groundedness": null
+    },
+    {
+      "id": "q9",
+      "question": "有效波高极值与近岸强浪事件的相关数据产品？",
+      "kept": 0,
+      "candidates": 6,
+      "retrieval_hit": 0,
+      "topic_recall": 0.0,
+      "citation_coverage": 0.0,
+      "revisions": 0,
+      "latency_ms": 5.0,
+      "groundedness": null
+    },
+    {
+      "id": "q10",
+      "question": "海洋碳观测与生物地球化学（BGC）相关产品有哪些？",
+      "kept": 6,
+      "candidates": 6,
+      "retrieval_hit": 1,
+      "topic_recall": 1.0,
+      "citation_coverage": 1.0,
+      "revisions": 0,
+      "latency_ms": 4.7,
+      "groundedness": null
+    }
+  ]
+}
