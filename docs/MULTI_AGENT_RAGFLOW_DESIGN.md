@@ -2,38 +2,72 @@
 
 ## 目标
 
-在现有系统基础上，把“海洋知识问答”升级为“可解释的海洋专题报告生成流水线”：
+本设计文档描述当前海洋数字地球项目的多 Agent 报告链路，以及它与 NetCDF 空间数据、RAGFlow 知识库、前端渲染规则之间的关系。
 
-- 用户输入自然语言问题，可附带当前地球框选区域、海洋要素统计结果。
-- 多 Agent 先凝练意图，再调用 RAGFlow 检索海洋文档。
-- 对检索结果做摘要阅读、相关性筛选、证据分组和冲突检查。
-- 最终用 DeepSeek 生成带证据来源、风险判断和规划建议的海洋报告。
-- 短期使用 Flask 内部编排；中长期暴露 A2A 风格接口，便于每个 Agent 独立服务化。
+系统目标不是“把大模型接到地图上”，而是构建一条可解释的数据和证据链：
 
-## 外部依据
+1. 用户在地球上框选区域。
+2. 后端读取 NetCDF，得到区域统计、格点和变量类型。
+3. 前端按变量类型限制渲染方式，避免错误表达。
+4. 多 Agent 使用区域数值和 RAGFlow 文献证据生成报告。
+5. CriticAgent 对报告进行质量审查，前端展示 trace 和证据链。
 
-- RAGFlow HTTP API 支持 `POST /api/v1/retrieval`，可指定 `dataset_ids`、`document_ids`、`top_k`、`similarity_threshold`、`vector_similarity_weight`、`rerank_id`、`keyword`、`highlight`、`cross_languages`、`use_kg`、`toc_enhance` 等检索参数。
-- A2A 的核心抽象适合长期演进：`AgentCard` 描述能力，`Task` 表示有状态协作过程，`Message` 承载交互内容，`Artifact` 承载最终产物。
+## 设计原则
+
+- **证据优先**：报告结论必须来自区域数据、检索文献或明确的数据缺口说明。
+- **物理一致**：标量变量不做粒子流，只有真实 `u/v` 矢量场才能开放 Windy 风格粒子。
+- **可降级**：RAGFlow 不可用时回退本地知识库，LLM 不可用时保留确定性摘要和诊断信息。
+- **可排障**：每一步输出 trace、状态、耗时、数据源和筛选结果。
+- **先内部编排，后服务拆分**：短期在 Flask 内部编排，长期可拆为 A2A 兼容 Agent 服务。
 
 ## 总体架构
 
-```text
-Browser / Cesium UI
-  -> Flask API
-      -> OrchestratorAgent
-          -> IntentAgent
-          -> ContextAgent
-          -> RetrievalAgent
-                -> RAGFlow /api/v1/retrieval
-                -> local fallback retriever
-          -> EvidenceScreeningAgent
-          -> EvidenceSynthesisAgent
-          -> DomainReasoningAgent
-          -> ReportAgent
-          -> CriticAgent
-      -> DeepSeek Chat Model
-      -> SQLite trace store
+```mermaid
+flowchart TB
+  User["用户<br/>问题 + 框选区域"] --> Frontend["前端<br/>Cesium + OpenLayers + AI 抽屉"]
+  Frontend --> OceanAPI["/api/ocean/query<br/>NetCDF bbox 切片"]
+  Frontend --> AgentAPI["/api/agents/report<br/>多 Agent 报告"]
+
+  OceanAPI --> NCReader["NetCDF Reader<br/>坐标索引/降采样/统计"]
+  NCReader --> LandMask["ETOPO Land Mask<br/>陆地区域置空"]
+  NCReader --> RenderMeta["变量分类<br/>scalar / relief / vector_component"]
+
+  AgentAPI --> Orchestrator["OrchestratorAgent"]
+  Orchestrator --> Intent["IntentAgent"]
+  Orchestrator --> Retrieval["RetrievalAgent"]
+  Orchestrator --> Context["ContextAgent"]
+  Orchestrator --> Screening["ScreeningAgent"]
+  Orchestrator --> Reasoning["DomainReasoningAgent"]
+  Orchestrator --> Report["ReportAgent"]
+  Orchestrator --> Critic["CriticAgent"]
+
+  Retrieval --> RAGFlow["RAGFlow API"]
+  Retrieval --> LocalRAG["Local fallback retriever"]
+  Report --> LLM["DeepSeek Chat"]
+  Critic --> LLM
 ```
+
+## 数据和渲染分类
+
+后端在 `GET /api/ocean/datasets` 和 `POST /api/ocean/query` 中返回变量分类元数据。前端不再靠按钮硬切，而是根据元数据控制可用渲染方式。
+
+| 分类 | 数据例子 | 返回字段 | 前端行为 |
+| --- | --- | --- | --- |
+| `scalar` | SST、SST anomaly、盐度、叶绿素、浪高 | `render_modes=["heatmap","contour","points"]` | 粒子按钮禁用 |
+| `relief` | ETOPO elevation/bathymetry | `land_mask="positive"` | 正高程陆地不渲染 |
+| `vector_component` | `u`、`v`、`uo`、`vo`、`u10`、`v10` | `vector_role`、`vector_pair` | 当前只识别，不开放粒子 |
+| `vector` | 后续由 `u/v` 合成 | `particle_ready=true` | 开放 Windy 风格粒子 |
+
+### 陆地掩膜
+
+当前 land mask 使用 `data/nc_uploads/etopo2022_taiwan_30s_bathy.nc`。后端查询海洋变量时：
+
+- 先读取目标变量格点。
+- 再用 ETOPO 判断格点中心和格子覆盖范围是否碰到陆地。
+- 碰到陆地的格点置为 `null`。
+- 统计值在掩膜后重新计算。
+
+这避免了 SST anomaly 等粗分辨率格子直接覆盖台湾、华南等陆地区域。
 
 ## Agent 职责
 
@@ -42,31 +76,23 @@ Browser / Cesium UI
 入口编排器，负责：
 
 - 创建任务 ID。
-- 汇总用户问题、前端框选区域、海洋要素统计值。
-- 顺序或并行调用下游 Agent。
-- 保存 trace，前端可展示“检索了哪些文档、保留了哪些证据、过滤了哪些证据”。
+- 汇总用户问题、前端框选区域、当前海洋变量、区域统计。
+- 调用下游 Agent。
+- 保存 trace，供前端展示。
 
-输入：
+输入示例：
 
 ```json
 {
-  "question": "目标海域海温升高对渔业有什么影响？",
+  "question": "目标海域海温异常对渔业有什么影响？",
   "region": {"west": 118, "east": 123, "south": 21, "north": 25},
-  "ocean_grid": {"variable": "sst", "stats": {"mean": 28.4}},
+  "ocean_grid": {
+    "dataset": "sst_anomaly_oisst_taiwan_small",
+    "variable": "anom",
+    "stats": {"mean": 0.81, "max": 3.06}
+  },
   "backend": "auto",
   "top_k": 8
-}
-```
-
-输出：
-
-```json
-{
-  "task_id": "report_20260521_001",
-  "status": "completed",
-  "report": "...",
-  "evidence": [...],
-  "trace": [...]
 }
 ```
 
@@ -74,62 +100,38 @@ Browser / Cesium UI
 
 负责问题凝练和检索计划：
 
+- 判断任务类型：风险评估、背景解释、规划建议、航行安全、生态影响等。
 - 识别主题：海温、盐度、叶绿素、海浪、海洋热浪、酸化、海平面、近岸污染、生态保护、灾害。
-- 把中文问题转换为中英双语检索 query。
-- 判断是否需要区域上下文、海洋要素统计、年份过滤、报告类型过滤。
+- 生成中英双语检索 query。
+- 判断是否需要区域数据、年份过滤、报告类型过滤。
 
 输出示例：
 
 ```json
 {
   "intent": "risk_assessment",
-  "topics": ["海洋热浪", "珊瑚", "渔业"],
+  "topics": ["海温异常", "渔业", "生态风险"],
   "queries": [
-    "海洋热浪 珊瑚 渔业 风险 监测 规划",
-    "marine heatwave coral reef fishery risk monitoring planning"
+    "海温异常 渔业 生态风险 监测 规划",
+    "sea surface temperature anomaly fishery ecological risk monitoring planning"
   ],
-  "filters": {
-    "language": ["zh", "en"],
-    "document_types": ["report", "paper", "product_manual"]
-  }
+  "needs_region_context": true
 }
 ```
 
-### 3. ContextAgent
-
-负责把地球框选和 NC 查询结果转成报告上下文：
-
-- 区域边界。
-- 数据集名和变量名。
-- 统计量：min/max/mean/count/step。
-- 数据是否为空、是否只覆盖部分区域。
-
-输出示例：
-
-```json
-{
-  "region_summary": "框选区域约为台湾周边 119E-123E, 21N-25N。",
-  "ocean_variables": [
-    {"variable": "sst", "mean": 28.4, "units": "Celsius"},
-    {"variable": "chlor_a", "mean": 0.38, "units": "mg m^-3"}
-  ],
-  "limitations": ["当前仅为局部格点切片，不代表长期趋势。"]
-}
-```
-
-### 4. RetrievalAgent
+### 3. RetrievalAgent
 
 负责调用 RAGFlow 或本地 fallback：
 
-- `backend=ragflow`：只调 RAGFlow，失败即报错。
-- `backend=auto`：优先 RAGFlow，失败回退本地 RAG。
-- `backend=local`：只用本地 metadata/seed 文档。
+- `backend=ragflow`：强制使用 RAGFlow。
+- `backend=auto`：优先 RAGFlow，失败后回退本地 RAG。
+- `backend=local`：只使用本地知识库。
 
 RAGFlow 请求建议：
 
 ```json
 {
-  "question": "海洋热浪 珊瑚 渔业 风险 监测 规划 marine heatwave coral fishery risk",
+  "question": "海温异常 渔业 生态风险 sea surface temperature anomaly fishery risk",
   "dataset_ids": ["ocean_cn_reports", "ocean_en_products"],
   "page": 1,
   "page_size": 12,
@@ -137,7 +139,6 @@ RAGFlow 请求建议：
   "similarity_threshold": 0.15,
   "vector_similarity_weight": 0.75,
   "keyword": true,
-  "highlight": false,
   "cross_languages": ["Chinese", "English"],
   "toc_enhance": true
 }
@@ -157,16 +158,44 @@ RAGFlow 请求建议：
 }
 ```
 
-### 5. EvidenceScreeningAgent
+### 4. ContextAgent
 
-负责“读摘要/片段，判断相关性高不高”：
+负责把地球框选和 NC 查询结果转成报告上下文：
+
+- 区域边界。
+- 数据集、变量、单位、分类。
+- 统计量：min/max/mean/count/step。
+- 掩膜信息：`land_mask_applied`、数据有效范围。
+- 局限性：时间层、深度层、分辨率、覆盖范围。
+
+输出示例：
+
+```json
+{
+  "region_summary": "框选区域约为台湾周边 117E-127E, 20N-26N。",
+  "ocean_variables": [
+    {
+      "variable": "anom",
+      "category": "scalar",
+      "mean": 0.81,
+      "units": "Celsius",
+      "land_mask_applied": 37
+    }
+  ],
+  "limitations": ["当前时间维度默认取第 0 层。", "粗分辨率数据不能解释小尺度近岸过程。"]
+}
+```
+
+### 5. ScreeningAgent
+
+负责相关性筛选：
 
 - 对每个 chunk 输出 keep/pass。
 - 给出相关性分数和理由。
-- 过滤标题相似但内容不足的文档。
 - 区分直接证据、背景证据、无关证据。
+- 防止只因标题相似而把弱相关文档带入报告。
 
-决策结构：
+输出示例：
 
 ```json
 {
@@ -174,56 +203,24 @@ RAGFlow 请求建议：
   "decision": "keep",
   "score": 0.82,
   "evidence_type": "direct",
-  "reason": "包含近岸海域生态环境、赤潮、海洋垃圾或生态监测相关信息。"
+  "reason": "包含近岸海域生态监测、赤潮或生态风险相关信息。"
 }
 ```
 
-### 6. EvidenceSynthesisAgent
+### 6. DomainReasoningAgent
 
-负责把保留证据分组：
+负责把数值和证据转成风险假设：
 
-- 气候与海温异常。
-- 生态风险。
-- 渔业与养殖。
-- 近岸污染与水质。
-- 灾害风险。
-- 监测指标。
-- 管理建议。
+- SST 或 SST anomaly 偏高：触发海洋热浪、珊瑚、渔业风险假设。
+- chlor_a 偏高：提示富营养化、藻华和近岸污染监测。
+- wave height 或 swell 异常：提示航行安全、近岸灾害、港口作业风险。
+- salinity 异常：提示淡水输入、河口混合、海气过程不确定性。
 
-输出结构：
+它不直接编造结论，只输出“由当前数据和证据支持的风险假设”和“不确定性”。
 
-```json
-{
-  "evidence_groups": [
-    {
-      "name": "生态风险",
-      "claims": [
-        {
-          "claim": "海洋热浪会增加珊瑚白化和生态系统服务损失风险。",
-          "sources": ["Marine heatwaves under global warming"]
-        }
-      ]
-    }
-  ]
-}
-```
-
-### 7. DomainReasoningAgent
-
-负责结合海洋要素数值与知识证据：
-
-- 如果 SST 偏高，触发热浪/珊瑚/渔业风险推理。
-- 如果 chlor_a 偏高，提示富营养化/藻华监测。
-- 如果 wave height 高，提示航运/近岸灾害风险。
-- 如果 salinity 异常，提示淡水输入、河口、海气过程不确定性。
-
-它不直接编造结论，只输出“可由证据支持的风险假设”和“不确定性”。
-
-### 8. ReportAgent
+### 7. ReportAgent
 
 负责最终报告：
-
-报告结构：
 
 1. 问题凝练
 2. 区域与数据背景
@@ -235,29 +232,34 @@ RAGFlow 请求建议：
 8. 不确定性与下一步数据需求
 9. 参考来源
 
-### 9. CriticAgent
+### 8. CriticAgent
 
-负责报告质量检查：
+负责质量检查：
 
 - 是否引用了证据。
 - 是否把 metadata 当作正文证据。
 - 是否存在“证据不足却强结论”的问题。
 - 是否遗漏用户问题中的核心要素。
-- 是否输出可执行规划建议。
+- 是否说明数据局限。
+- 是否输出可执行建议。
 
 若检查失败，返回修改意见给 ReportAgent 重写。
 
 ## Trace 设计
 
-每次报告生成保存一份 trace：
+每次报告生成保存 trace：
 
 ```json
 {
   "task_id": "...",
   "intent": {...},
+  "context": {
+    "variables": ["anom"],
+    "land_mask_applied": 37
+  },
   "retrieval": {
     "backend": "ragflow",
-    "queries": [...],
+    "queries": ["..."],
     "candidate_count": 24
   },
   "screening": [
@@ -271,7 +273,7 @@ RAGFlow 请求建议：
 }
 ```
 
-前端可以把 trace 做成“证据链抽屉”，用户点击报告中的来源即可查看对应文档片段。
+前端可以把 trace 做成“证据链抽屉”，用户点击报告中的来源即可查看对应片段。
 
 ## API 设计
 
@@ -317,46 +319,51 @@ RAGFlow 请求建议：
 }
 ```
 
-## 实施路线
+## 当前已完成
 
-### 第 1 阶段：内部多 Agent 编排
+- 多 Agent 报告流水线已具备可演示版本。
+- RAGFlow/local fallback 检索链路已接入。
+- 前端展示 trace、证据、报告阅读面板。
+- NetCDF 数据集发现、bbox 查询、统计和渲染已接入。
+- 变量分类元数据已接入前后端。
+- 陆地掩膜已接入查询结果。
+- GitHub 远程仓库已配置并推送。
 
-- 新增 `ocean_agents_demo/agents/`。
-- 把当前 `run_pipeline()` 拆成多个 Agent 类。
-- 新增 `/api/agents/report`。
-- 前端 AI 抽屉展示 trace。
+## 下一阶段实施路线
 
-### 第 2 阶段：RAGFlow 深度接入
+### 阶段 1：真实矢量场接入
 
-- `.env` 配置 `RAGFLOW_API_KEY` 和 `RAGFLOW_DATASET_IDS`。
-- RetrievalAgent 支持多 query 融合：
-  - 中文 query
-  - 英文 query
-  - HyDE query
-- 增加 metadata 过滤：年份、语言、报告类型。
-- 支持 RAGFlow 返回 chunk 高亮和文档来源。
+- 下载小范围 `u/v` 风场或海流 NetCDF。
+- 优先候选：`u10/v10` 风场或 `uo/vo` 表层海流。
+- 后端新增矢量场联合查询：
+  - 输入：dataset、u variable、v variable、bbox。
+  - 输出：`u_values`、`v_values`、`speed_values`、stats、单位、时间层。
+- 前端只对 `particle_ready=true` 的矢量场开放粒子流。
 
-### 第 3 阶段：报告质量控制
+### 阶段 2：渲染质量
 
-- 加入 CriticAgent。
-- 对低证据报告强制标注“证据不足”。
-- 增加来源覆盖率指标：
-  - 至少 3 个保留证据。
-  - 至少 1 个区域/数据上下文。
-  - 每个核心结论至少绑定 1 个来源。
+- 标量填色：保留稳定的 fill/contour/point 三类，不追求假动画。
+- 水深地形：使用专用海底色带，陆地透明。
+- 矢量粒子：按真实 `u/v` 插值移动，支持粒子数量、速度倍率、拖尾长度。
+- 小地图：保持静态缩略图，避免动画重建图层导致闪烁。
 
-### 第 4 阶段：A2A 兼容
+### 阶段 3：报告可信度
+
+- 在报告中显式引用当前变量分类和数据局限。
+- 若用户要求粒子但当前数据不是矢量场，报告中说明“缺少真实 u/v 数据”。
+- 增加每个核心结论的证据绑定。
+
+### 阶段 4：服务化和 A2A
 
 - 暴露 Agent Card。
-- 增加 task/message/artifact 数据结构。
-- 支持异步任务与轮询。
+- 引入 task/message/artifact 数据结构。
+- 支持异步任务和轮询。
 - 后续可把 RetrievalAgent、ReportAgent 拆成独立容器。
 
-## 当前推荐实现优先级
+## 风险和边界
 
-1. 先实现内部多 Agent，不急着拆微服务。
-2. RAGFlow 解析完成后，优先调通 `RetrievalAgent -> RAGFlow /api/v1/retrieval`。
-3. 在报告里展示“保留证据/过滤证据/来源片段”。
-4. 再加 CriticAgent，防止模型在证据不足时强行下结论。
-5. 最后做 A2A 兼容接口。
-
+- RAGFlow 需要手工建库、上传文档、解析并配置 Dataset ID。
+- 当前 NetCDF 时间/深度维度默认取第 0 层。
+- Docker 在中文路径下 build 可能触发 gRPC header 编码问题，推荐英文路径 clone 后构建。
+- 粒子流必须等真实矢量场数据，不能再用 SST 或 ETOPO 伪造。
+- ETOPO 掩膜只覆盖已下载区域，超出覆盖范围的数据不会被掩膜。

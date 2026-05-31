@@ -1,24 +1,69 @@
 # Ocean Digital Earth RAG Multi-Agent Demo
 
-面向求职展示的海洋数字地球项目：用 Cesium 展示可旋转三维地球，用 NetCDF 读取真实海洋要素并渲染填色图，用 RAGFlow/本地知识库 + DeepSeek + 多 Agent 生成海洋风险分析报告。
+面向项目展示和求职答辩的海洋数字地球系统。项目把 Cesium 三维地球、OpenLayers 二维定位、NetCDF 海洋要素切片、RAGFlow/本地知识库检索、DeepSeek 多 Agent 报告生成整合到同一条可演示链路中。
+
+## 当前定位
+
+本项目不是单纯聊天机器人，而是一个“空间数据 + 知识检索 + 多 Agent 推理”的海洋风险分析原型：
+
+- 用户在地球上框选区域。
+- 后端按经纬度读取 NetCDF，返回格点、统计值和渲染元数据。
+- 前端按变量类型选择合适渲染方式。
+- AI 助手把区域数值、RAGFlow 检索证据和多 Agent 推理过程合成报告。
 
 ## 核心能力
 
-- 三维数字地球：Cesium 大地球、框选区域、海洋要素叠加渲染。
-- 二维定位辅助：OpenLayers 小地图同步框选和栅格结果。
-- NetCDF 后端解析：Flask 读取 `.nc`，按经纬度 bbox 切片，支持 `step/max_points` 降采样。
-- 知识库问答：本地文档回退 + 可选 RAGFlow 检索。
-- 多 Agent 报告：Intent、Retrieval（工具循环 / function calling）、Context、Screening、DomainReasoning、Report、Critic 七个 Agent 组成可追踪流水线。
-- 区域数值×RAG 融合：框选海域后 ContextAgent 调用 NetCDF 工具取要素统计，DomainReasoningAgent 按阈值触发风险假设，报告同时结合数值与文献证据。
-- 离线评测：`eval/` 提供问题集与指标脚本（检索命中率 / 主题召回 / 引用覆盖 / 耗时 / 忠实度），无 Key 也能跑确定性指标。
-- 工程化部署：Nginx + Flask/Gunicorn + GeoServer + SQLite + Docker Compose。
-- 证据链展示：前端展示 RAGFlow/local 状态、Agent trace、keep/pass 文档、文档名、页码、知识库来源、Critic 结果。
+- 数字地球：Cesium 三维地球、框选区域、海洋栅格图层叠加。
+- 二维定位：OpenLayers 小地图同步框选和渲染结果。
+- NetCDF 读取：Flask 后端读取 `.nc`，按 bbox 切片，支持 `step` 和 `max_points` 降采样。
+- 渲染分类：按变量类型限制渲染方式，避免用标量数据伪造粒子流。
+- 陆地掩膜：使用 ETOPO 2022 高分辨率地形/水深数据做 land mask，海洋变量落到陆地区域时返回 `null`，前端不渲染。
+- RAG 检索：RAGFlow 优先，本地知识库回退，保证 demo 在离线或 RAGFlow 未配置时仍能运行。
+- 多 Agent 报告：Intent、Retrieval、Context、Screening、Reasoning、Report、Critic 组成可追踪报告流水线。
+- 证据链展示：前端显示 Agent trace、保留/过滤证据、来源文档、页码、知识库来源和 Critic 结果。
+- 工程化部署：Nginx、Flask/Gunicorn、GeoServer、SQLite、Docker Compose。
+- 离线评测：`eval/` 提供固定问题集、报告和指标脚本。
+
+## 系统架构
+
+```mermaid
+flowchart LR
+  UI["Browser UI<br/>Cesium + OpenLayers"] --> API["Flask API<br/>/api/ocean + /api/agents"]
+  API --> NC["NetCDF Reader<br/>bbox slice, stats, land mask"]
+  API --> GA["GeoAgent / Multi-Agent Pipeline"]
+  GA --> RAG["RAGFlow Retrieval"]
+  GA --> Local["Local fallback knowledge"]
+  GA --> LLM["DeepSeek Chat"]
+  API --> GS["GeoServer<br/>WMS/WCS extension point"]
+  NC --> DATA["data/nc_uploads<br/>SST, SSS, CHL, Waves, ETOPO"]
+  RAG --> DOCS["PDF reports / datasets"]
+  Local --> DOCS
+```
+
+## 渲染规则
+
+前端不再把所有变量都暴露给所有渲染模式，而是由后端元数据控制：
+
+| 变量类型 | 示例 | 可用渲染 | 说明 |
+| --- | --- | --- | --- |
+| 标量 `scalar` | SST、SST anomaly、盐度、叶绿素、浪高 | 填色、等值线、点图 | 普通海洋要素，不开放粒子流 |
+| 地形/水深 `relief` | ETOPO elevation/bathymetry | 填色、等值线、点图 | 正高程陆地被置空，不渲染颜色 |
+| 矢量分量 `vector_component` | `u/v`、`uo/vo`、`u10/v10` | 当前暂不开放粒子 | 已预留识别规则，等待后端联合查询 |
+| 真实矢量场 `vector` | 后续海流或风场合成变量 | 填色、粒子流 | 只有真实 `u/v` 场才做 Windy 风格粒子 |
+
+关键原则：
+
+- SST、盐度、叶绿素、浪高等标量只做填色、等值线、点图。
+- 粒子流必须由真实矢量场驱动，不能用标量梯度伪造。
+- 海洋变量查询会用 ETOPO 掩膜清理陆地区域。
+- 粗分辨率数据的格子如果覆盖陆地，会整格置空，优先保证陆地不被涂色。
 
 ## 访问地址
 
 - Demo Web: http://127.0.0.1:8000
 - Demo Health: http://127.0.0.1:8000/api/health
 - Project Status: http://127.0.0.1:8000/api/project/status
+- Ocean Datasets: http://127.0.0.1:8000/api/ocean/datasets
 - RAG Status: http://127.0.0.1:8000/api/rag/status
 - GeoServer: http://127.0.0.1:8000/geoserver/web/
 - RAGFlow Web: http://127.0.0.1:8088
@@ -29,7 +74,8 @@
 ```powershell
 cd C:\Users\lmh\Desktop\海洋rag+多agent
 
-# Windows 中文路径下建议关闭 BuildKit，避免 Docker Compose gRPC session 编码问题
+# 中文路径下 Docker Desktop build session 可能触发 gRPC header 编码问题。
+# 建议长期使用英文路径 clone；临时运行时可先关闭 BuildKit。
 $env:DOCKER_BUILDKIT='0'
 $env:COMPOSE_DOCKER_CLI_BUILD='1'
 
@@ -49,8 +95,8 @@ docker compose up -d
 cd C:\Users\lmh\Desktop\海洋rag+多agent
 powershell -ExecutionPolicy Bypass -File scripts\diagnose.ps1
 
-# 额外触发一次 arXiv 文献拉取等慢速检查
-powershell -ExecutionPolicy Bypass -File scripts\diagnose.ps1 -Deep
+# 跳过 Docker/RAGFlow 深度检查，适合快速确认 API 和 Agent 链路
+powershell -ExecutionPolicy Bypass -File scripts\diagnose.ps1 -SkipDocker -SkipRagFlow
 ```
 
 ## 环境变量
@@ -78,76 +124,119 @@ RAGFLOW_DATASET_IDS=dataset_id_1,dataset_id_2
 ```text
 data/
   nc_uploads/        # 用户下载的 NetCDF 文件
-  pdf_reports/       # 用户下载的 PDF 报告
+  pdf_reports/       # PDF 报告，默认不入库
   knowledge_docs/    # 本地摘要种子文档
   ocean_knowledge.json
   sample_ocean.nc
 ```
 
-当前已识别 10 个 NetCDF 数据集，包括 SST、盐度、叶绿素、浪高、涌浪方向、涌浪周期等。页面点击“同步”或调用：
+当前本地数据包括：
+
+- `noaa_oisst_sst_subset.nc`：NOAA OISST 示例 SST。
+- `sst_oisst_taiwan_small.nc`、`sst_anomaly_oisst_taiwan_small.nc`、`sst_error_oisst_taiwan_small.nc`：台湾周边 OISST 小范围数据。
+- `sss_smos_taiwan_small.nc`：海表盐度。
+- `chlorophyll_viirs_taiwan_small.nc`：叶绿素。
+- `wave_height_ww3_taiwan_small.nc`、`swell_*_ww3_taiwan_small.nc`：浪高、涌浪方向、涌浪周期。
+- `etopo2022_taiwan_30s_bathy.nc`：ETOPO 2022 台湾周边 30 arc-second 地形/水深子集，用于水深渲染和 land mask。
+
+同步本地数据：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/sync -Method Post
 ```
 
-补充 arXiv 摘要文献到本地知识库：
-
-```powershell
-python -m geo_agent.knowledge.arxiv_fetcher --all --max 1 --queries-per-domain 1 --delay 0 --timeout 20
-```
-
-生成的 Markdown 会写入 `data/knowledge_docs/`，可直接用于本地检索，也可上传到 RAGFlow 建库。
-
 ## API 摘要
 
-- `GET /api/project/status`：聚合项目状态，适合演示或面试排障。
-- `GET /api/ocean/datasets`：返回可渲染 NetCDF 数据集、变量、分辨率和推荐步长。
-- `POST /api/ocean/query`：按 bbox 读取 NetCDF 切片并返回 grid/stats。
+- `GET /api/project/status`：聚合项目状态，适合演示或排障。
+- `GET /api/ocean/datasets`：返回 NetCDF 数据集、变量、分辨率、分类、推荐渲染模式。
+- `POST /api/ocean/query`：按 bbox 读取 NetCDF 切片，返回 grid/stats/render metadata/land mask 结果。
 - `GET /api/rag/status`：返回 LLM、本地知识库、RAGFlow 配置状态。
-- `POST /api/agents/report`：运行多 Agent 报告流水线，入参可带 `region`(框选 bbox) 与 `variables`；返回 `trace`、`critic`、`ocean_context`、`risk_hypotheses`、`kept_documents`、`passed_documents`。
-- `GET /api/agents`：返回各 Agent 能力清单。
-- `GET /.well-known/agent-card.json`：A2A 风格 AgentCard（内嵌工具 schema）。
+- `POST /api/agents/report`：运行多 Agent 报告流水线。
+- `GET /api/agents`：返回 Agent 能力清单。
+- `GET /.well-known/agent-card.json`：A2A 风格 AgentCard。
 
-RAGFlow 检索会额外补全文档元数据：后端调用 `GET /api/v1/datasets` 和 `GET /api/v1/datasets/{dataset_id}/documents` 建立缓存，把 retrieval chunk 关联回文件名、知识库名、语言、页码和相似度分解，前端证据卡片可直接展示来源。
+`/api/ocean/query` 返回的重要字段：
+
+```json
+{
+  "dataset": "sst_anomaly_oisst_taiwan_small",
+  "variable": "anom",
+  "category": "scalar",
+  "render_modes": ["heatmap", "contour", "points"],
+  "land_mask_applied": 37,
+  "values": [[null, 0.12, "..."]],
+  "stats": {"min": -0.6, "max": 3.06, "mean": 0.8133, "count": 361}
+}
+```
 
 ## 多 Agent 流程
 
 ```mermaid
 flowchart LR
   Q["User Question + Region/Grid Context"] --> I["IntentAgent<br/>问题凝练/双语检索规划"]
-  I --> R["RetrievalAgent<br/>工具循环 function calling<br/>RAGFlow / Local"]
+  I --> R["RetrievalAgent<br/>RAGFlow / Local fallback"]
   R --> X["ContextAgent<br/>NetCDF 区域要素统计"]
   X --> S["ScreeningAgent<br/>keep/pass 证据筛选"]
-  S --> D["DomainReasoningAgent<br/>数值阈值→风险假设"]
+  S --> D["DomainReasoningAgent<br/>数值阈值和风险假设"]
   D --> P["ReportAgent<br/>数值+证据生成报告"]
   P --> C["CriticAgent<br/>质量审查"]
   C -->|需要修订| P
   C --> O["Final Report + Trace + Evidence"]
 ```
 
+## GitHub
+
+远程仓库：
+
+```text
+https://github.com/qiasixiaoye/seaProject
+```
+
+当前关键提交：
+
+- `0bdba32 backup restored ocean demo baseline`
+- `7359435 classify ocean render modes`
+- `bdb215f mask ocean rasters over land`
+
 ## 面试讲法
 
-这个项目不要只讲“接了大模型”。重点讲三条线：
+这个项目建议按四条线讲：
 
-1. 空间数据线：前端框选经纬度 bbox，后端对 NetCDF 做坐标索引、切片、降采样、统计，返回栅格，前端映射成填色图。
-2. 知识检索线：RAGFlow 有配置则用向量检索，未配置则本地 BM25 风格回退，保证 demo 可用。
-3. Agent 证据线：先凝练意图，再用工具循环让 LLM 自主决定检索 query（function calling），再筛证据，结合区域数值做风险推理，再生成报告，最后 Critic 审查并可打回重写；前端把 trace 和 keep/pass 展示出来，避免“黑盒问答”。
-4. 工程可信度线：`tools.py` 工具注册 + ReAct 工具循环、各 Agent 无 Key 自动降级、`eval/` 离线评测给出量化指标。
+1. 空间数据线：前端框选 bbox，后端对 NetCDF 做坐标索引、切片、降采样、统计和陆地掩膜。
+2. 渲染可信线：按变量类型限制渲染方式，避免“看起来酷但物理错误”的粒子流。
+3. 知识检索线：RAGFlow 优先，本地检索兜底，保留证据链和来源。
+4. Agent 推理线：意图识别、检索、上下文、筛证、领域推理、报告、批判审查形成闭环。
+
+一句话总结：
+
+> 我不是把大模型接到地图上，而是把空间数据、海洋知识库和多 Agent 推理做成一条可解释、可降级、可排障的海洋风险分析链路。
 
 ## 评测
-
-离线评测脚本对固定问题集跑完整流水线并输出指标。确定性指标（检索命中率 / 主题召回 / 引用覆盖 / 耗时 / Critic 修订）无需 API Key；配置 DeepSeek 后额外计算 LLM-as-judge 忠实度。
 
 ```powershell
 python eval\run_eval.py --backend local
 ```
 
-结果写入 `eval/report.md` 与 `eval/report.json`。当前本地基线（10 题）：检索命中率 0.9、主题召回 0.9、引用覆盖 0.9、平均端到端耗时约 7ms。
+结果写入：
+
+- `eval/report.md`
+- `eval/report.json`
+
+当前本地基线用于验证检索命中率、主题召回、引用覆盖、耗时和 Critic 修订情况。配置 DeepSeek 后可增加 LLM-as-judge 忠实度评估。
 
 ## 已知边界
 
 - 本地 PDF 默认只用文件名和元数据参与检索，全文解析建议交给 RAGFlow。
-- GeoServer 当前作为部署组件和后续 WMS/WCS 扩展入口，NetCDF 渲染主链路仍走 Flask。
-- NetCDF 时间/深度维度目前默认取第 0 层，后续可以加时间轴和深度选择。
-- 风速、云量、能见度、AOD 等变量如果未在当前 NetCDF 数据集中出现，报告会显式标记为数据缺口，不会据此下强结论。
-- RAGFlow 需要手动在 Web 端建库、上传文档、解析完成后复制 API Key 和 Dataset ID 到 `.env`。
+- GeoServer 当前作为部署组件和 WMS/WCS 扩展入口，NetCDF 主渲染链路仍走 Flask。
+- NetCDF 时间/深度维度目前默认取第 0 层，后续需要时间轴和深度选择。
+- 当前粒子流按钮已按规则禁用，等待真实 `u/v` 风场或海流数据接入。
+- Docker Compose 在中文路径下可能出现 build gRPC header 编码问题，建议在英文路径 clone 后构建。
+- 陆地掩膜依赖 `etopo2022_taiwan_30s_bathy.nc`，覆盖范围外的数据不会被 ETOPO 掩膜处理。
+
+## 下一步路线
+
+1. 下载真实 `u/v` 风场或海流 NetCDF，小范围优先。
+2. 后端增加矢量场联合查询，返回 `u_values`、`v_values`、`speed`。
+3. 前端只对真实矢量场开放 Windy 风格粒子流。
+4. 标量场继续走填色、等值线、点图。
+5. 增加时间/深度选择和更稳定的色带方案。
