@@ -1,0 +1,18 @@
+{
+  "id": "hycom_luzon_uv_surface_20240905",
+  "file": "hycom_luzon_uv_surface_20240905.nc",
+  "source": "HYCOM GOFS 3.1 GLBy0.08 expt_93.0 uv3z NetCDF Subset Service",
+  "source_url": "https://ncss.hycom.org/thredds/ncss/grid/GLBy0.08/expt_93.0/uv3z",
+  "download_url": "https://ncss.hycom.org/thredds/ncss/grid/GLBy0.08/expt_93.0/uv3z?var=water_u&var=water_v&north=26&west=117&east=127&south=18&disableProjSubset=on&horizStride=3&time=2024-09-05T09%3A00%3A00Z&vertCoord=0&accept=netcdf4",
+  "bbox": {
+    "west": 117,
+    "east": 127,
+    "south": 18,
+    "north": 26
+  },
+  "time": "2024-09-05T09:00:00Z",
+  "depth_m": 0,
+  "variables": ["water_u", "water_v"],
+  "units": "m/s",
+  "purpose": "Real u/v ocean-current sample for vector rendering and particle-flow validation."
+}

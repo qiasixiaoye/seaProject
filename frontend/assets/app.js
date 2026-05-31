@@ -37,6 +37,7 @@ const els = {
   variable:       document.getElementById("variable"),
   selectBtn:      document.getElementById("selectBtn"),
   queryBtn:       document.getElementById("queryBtn"),
+  currentDemoBtn: document.getElementById("currentDemoBtn"),
   clearBtn:       document.getElementById("clearBtn"),
   stepInput:      document.getElementById("stepInput"),
   maxPointsInput: document.getElementById("maxPointsInput"),
@@ -323,6 +324,7 @@ function bindEvents() {
   els.chatClear.addEventListener("click", clearChat);
   els.selectBtn.addEventListener("click", toggleSelectMode);
   els.queryBtn.addEventListener("click", queryOcean);
+  els.currentDemoBtn?.addEventListener("click", runCurrentDemo);
   els.clearBtn.addEventListener("click", clearSelection);
   els.syncBtn.addEventListener("click", syncFiles);
   els.askBtn.addEventListener("click", askAgent);
@@ -1041,6 +1043,22 @@ async function queryOcean() {
   }
 }
 
+async function runCurrentDemo() {
+  const value = "hycom_luzon_uv_surface_20240905::water_u";
+  const option = Array.from(els.variable.options).find((item) => item.value === value);
+  if (!option) {
+    els.oceanStatus.textContent = "未找到 HYCOM 海流样例，请先确认 hycom_luzon_uv_surface_20240905.nc 已在 data/nc_uploads 中。";
+    return;
+  }
+  els.variable.value = value;
+  state.renderMode = "particles";
+  els.stepInput.value = "1";
+  els.maxPointsInput.value = "9000";
+  setSelection({ lon: 117, lat: 18 }, { lon: 127, lat: 26 });
+  updateRenderModeAvailability();
+  await queryOcean();
+}
+
 function clearSelection() {
   state.selection = null;
   state.grid = null;
@@ -1132,20 +1150,25 @@ function gridCanvas(data, width, height) {
   canvas.height = height;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, width, height);
-  const rows = data.values.length;
-  const cols = data.values[0]?.length || 0;
-  const cw = width / Math.max(1, cols);
-  const ch = height / Math.max(1, rows);
   const min = data.stats.min;
   const max = data.stats.max;
-  for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-      const value = data.values[i][j];
+  const image = ctx.createImageData(width, height);
+  const pixels = image.data;
+  for (let y = 0; y < height; y++) {
+    const ny = height <= 1 ? 0 : y / (height - 1);
+    for (let x = 0; x < width; x++) {
+      const nx = width <= 1 ? 0 : x / (width - 1);
+      const value = sampleInterpolatedGrid(data, nx, ny);
       if (shouldSkipValue(data, value)) continue;
-      ctx.fillStyle = color((value - min) / Math.max(1e-9, max - min));
-      ctx.fillRect(j * cw, i * ch, Math.ceil(cw) + 1, Math.ceil(ch) + 1);
+      const rgb = colorRgb(normalizeValue(value, min, max));
+      const k = (y * width + x) * 4;
+      pixels[k] = rgb[0];
+      pixels[k + 1] = rgb[1];
+      pixels[k + 2] = rgb[2];
+      pixels[k + 3] = data.category === "vector" ? 205 : 190;
     }
   }
+  ctx.putImageData(image, 0, 0);
   return canvas;
 }
 
@@ -1222,6 +1245,9 @@ function particleCanvas(data, width, height) {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
+  if (!data.u_grid || !data.v_grid) {
+    return gridCanvas(data, width, height);
+  }
   seedParticles(data, width, height);
   drawParticles(data, canvas, true);
   return canvas;
@@ -1231,12 +1257,23 @@ function seedParticles(data, width, height) {
   const rows = data.values.length;
   const cols = data.values[0]?.length || 0;
   const count = Math.max(120, Math.min(520, Math.floor(rows * cols * 0.18)));
-  state.renderParticles = Array.from({ length: count }, () => ({
+  state.renderParticles = Array.from({ length: count }, () => randomParticle(data, width, height));
+}
+
+function randomParticle(data, width, height) {
+  for (let tries = 0; tries < 20; tries++) {
+    const x = Math.random() * width;
+    const y = Math.random() * height;
+    if (sampleVector(data, x / width, y / height)) {
+      return { x, y, life: 35 + Math.random() * 130, speed: 1.1 + Math.random() * 1.9 };
+    }
+  }
+  return {
     x: Math.random() * width,
     y: Math.random() * height,
-    life: 20 + Math.random() * 120,
-    speed: 0.7 + Math.random() * 2.2,
-  }));
+    life: 35 + Math.random() * 130,
+    speed: 1.1 + Math.random() * 1.9,
+  };
 }
 
 function startParticleAnimation(data, canvas) {
@@ -1274,18 +1311,20 @@ function drawParticles(data, canvas, initial) {
   for (const p of state.renderParticles) {
     const beforeX = p.x;
     const beforeY = p.y;
-    const flow = scalarFlow(data, p.x / width, p.y / height);
-    p.x += flow.x * p.speed;
-    p.y += flow.y * p.speed;
-    p.life -= 1;
-    if (p.x < 0 || p.x > width || p.y < 0 || p.y > height || p.life <= 0) {
-      p.x = Math.random() * width;
-      p.y = Math.random() * height;
-      p.life = 30 + Math.random() * 140;
+    const flow = sampleVector(data, p.x / width, p.y / height);
+    if (!flow) {
+      Object.assign(p, randomParticle(data, width, height));
       continue;
     }
-    const value = sampleGrid(data, p.x / width, p.y / height);
-    const t = normalizeValue(value ?? min, min, max);
+    const scale = 9.5 / Math.max(0.08, max);
+    p.x += flow.u * scale * p.speed;
+    p.y -= flow.v * scale * p.speed;
+    p.life -= 1;
+    if (p.x < 0 || p.x > width || p.y < 0 || p.y > height || p.life <= 0) {
+      Object.assign(p, randomParticle(data, width, height));
+      continue;
+    }
+    const t = normalizeValue(flow.speed ?? min, min, max);
     ctx.strokeStyle = colorAlpha(t, 0.55 + t * 0.35);
     ctx.beginPath();
     ctx.moveTo(beforeX, beforeY);
@@ -1294,28 +1333,51 @@ function drawParticles(data, canvas, initial) {
   }
 }
 
-function scalarFlow(data, nx, ny) {
-  const eps = 0.015;
-  const left = sampleGrid(data, nx - eps, ny);
-  const right = sampleGrid(data, nx + eps, ny);
-  const up = sampleGrid(data, nx, ny - eps);
-  const down = sampleGrid(data, nx, ny + eps);
-  const gx = (right ?? 0) - (left ?? 0);
-  const gy = (down ?? 0) - (up ?? 0);
-  const angle = Math.atan2(gy, gx) + Math.PI / 2;
-  const mag = Math.min(5.2, Math.max(1.1, Math.hypot(gx, gy) * 3.2));
-  return { x: Math.cos(angle) * mag, y: Math.sin(angle) * mag };
+function sampleVector(data, nx, ny) {
+  if (!data.u_grid || !data.v_grid) return null;
+  const u = sampleGridValue(data.u_grid, nx, ny);
+  const v = sampleGridValue(data.v_grid, nx, ny);
+  const speed = sampleGrid(data, nx, ny);
+  if (u === null || v === null || speed === null) return null;
+  return { u, v, speed };
 }
 
 function sampleGrid(data, nx, ny) {
-  const rows = data.values.length;
-  const cols = data.values[0]?.length || 0;
+  return sampleGridValue(data.values, nx, ny);
+}
+
+function sampleGridValue(values, nx, ny) {
+  const rows = values.length;
+  const cols = values[0]?.length || 0;
   if (!rows || !cols) return null;
   const x = Math.max(0, Math.min(cols - 1, nx * (cols - 1)));
   const y = Math.max(0, Math.min(rows - 1, ny * (rows - 1)));
   const i = Math.floor(y);
   const j = Math.floor(x);
-  return data.values[i]?.[j] ?? null;
+  return values[i]?.[j] ?? null;
+}
+
+function sampleInterpolatedGrid(data, nx, ny) {
+  const values = data.values;
+  const rows = values.length;
+  const cols = values[0]?.length || 0;
+  if (!rows || !cols) return null;
+  const x = Math.max(0, Math.min(cols - 1, nx * (cols - 1)));
+  const y = Math.max(0, Math.min(rows - 1, ny * (rows - 1)));
+  const j0 = Math.floor(x);
+  const i0 = Math.floor(y);
+  const j1 = Math.min(cols - 1, j0 + 1);
+  const i1 = Math.min(rows - 1, i0 + 1);
+  const v00 = values[i0]?.[j0];
+  const v10 = values[i0]?.[j1];
+  const v01 = values[i1]?.[j0];
+  const v11 = values[i1]?.[j1];
+  if ([v00, v10, v01, v11].some((v) => shouldSkipValue(data, v))) return null;
+  const fx = x - j0;
+  const fy = y - i0;
+  const top = v00 + (v10 - v00) * fx;
+  const bottom = v01 + (v11 - v01) * fx;
+  return top + (bottom - top) * fy;
 }
 
 function marchingCell(v00, v10, v11, v01, level, x, y, w, h) {

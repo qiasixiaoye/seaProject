@@ -411,9 +411,7 @@ def _variable_render_meta(
     vector_pair = _vector_pair_name(name, role, all_names) if role else ""
     if vector_pair:
         category = "vector_component"
-        # Particle rendering needs both components read together. The UI keeps
-        # it disabled until the vector query path is explicitly implemented.
-        modes = ["heatmap", "contour", "points"]
+        modes = ["heatmap", "particles", "contour", "points"]
 
     return {
         "category": category,
@@ -421,7 +419,7 @@ def _variable_render_meta(
         "land_mask": land_mask,
         "vector_role": role,
         "vector_pair": vector_pair,
-        "particle_ready": False,
+        "particle_ready": bool(vector_pair),
     }
 
 
@@ -443,8 +441,8 @@ def _vector_pair_name(name: str, role: str, all_names: set[str]) -> str:
         return ""
     lower_to_name = {n.lower(): n for n in all_names}
     pair_map = {
-        "u": ["v", "vo", "v10", "vwnd", "vgrd", "vgos", "water_v", "northward_current", "northward_wind"],
-        "v": ["u", "uo", "u10", "uwnd", "ugrd", "ugos", "water_u", "eastward_current", "eastward_wind"],
+        "u": ["v", "vo", "v10", "vwnd", "vgrd", "vgos", "water_v", "water_v_bottom", "northward_current", "northward_wind"],
+        "v": ["u", "uo", "u10", "uwnd", "ugrd", "ugos", "water_u", "water_u_bottom", "eastward_current", "eastward_wind"],
     }
     lower = name.lower()
     candidates = [lower.replace("u", "v", 1)] if role == "u" and lower.startswith("u") else []
@@ -727,6 +725,42 @@ def _nearest_index(values: list[float], target: float) -> int:
     return idx if ascending else len(values) - 1 - idx
 
 
+def _nc_fill_values(var: Any) -> list[Any]:
+    fill_values = []
+    for attr in ("_FillValue", "missing_value"):
+        if hasattr(var, attr):
+            fill_values.append(getattr(var, attr))
+    return fill_values
+
+
+def _selected_grid_values(var: Any, selectors: list[Any], slice_axes: list[str]) -> list[list[Any]]:
+    values = var[tuple(selectors)]
+    try:
+        values = values.filled(float("nan"))
+    except AttributeError:
+        pass
+    if slice_axes == ["lon", "lat"]:
+        values = values.T
+    if hasattr(values, "tolist"):
+        values = values.tolist()
+    if values and not isinstance(values[0], list):
+        values = [values]
+    return values
+
+
+def _align_vectors_to_mask(
+    mask_grid: list[list[float | None]],
+    u_grid: list[list[float | None]],
+    v_grid: list[list[float | None]],
+) -> tuple[list[list[float | None]], list[list[float | None]]]:
+    for i, row in enumerate(mask_grid):
+        for j, value in enumerate(row):
+            if value is None:
+                u_grid[i][j] = None
+                v_grid[i][j] = None
+    return u_grid, v_grid
+
+
 def _query_grid_netcdf4(
     path: Path,
     variable: str,
@@ -780,22 +814,110 @@ def _query_grid_netcdf4(
                 slice_axes.append("lon")
             else:
                 selectors.append(0)
-        values = var[tuple(selectors)]
-        try:
-            values = values.filled(float("nan"))
-        except AttributeError:
-            pass
-        if slice_axes == ["lon", "lat"]:
-            values = values.T
-        if hasattr(values, "tolist"):
-            values = values.tolist()
-        if values and not isinstance(values[0], list):
-            values = [values]
+        units = _jsonable(getattr(var, "units", ""))
+        long_name = _jsonable(getattr(var, "long_name", variable))
+        render_meta = _variable_render_meta(path.stem, variable, units, long_name, dims, set(nc.variables.keys()))
+        lat_out = [float(x) for x in lat_out]
+        lon_out = [float(x) for x in lon_out]
 
-        fill_values = []
-        for attr in ("_FillValue", "missing_value"):
-            if hasattr(var, attr):
-                fill_values.append(getattr(var, attr))
+        pair_name = str(render_meta.get("vector_pair") or "")
+        if pair_name and pair_name in nc.variables:
+            pair_var = nc.variables[pair_name]
+            pair_dims = list(pair_var.dimensions)
+            if lat_dim in pair_dims and lon_dim in pair_dims:
+                pair_selectors: list[Any] = []
+                pair_axes: list[str] = []
+                for dim in pair_dims:
+                    if dim == lat_dim:
+                        pair_selectors.append(lat_slice)
+                        pair_axes.append("lat")
+                    elif dim == lon_dim:
+                        pair_selectors.append(lon_slice)
+                        pair_axes.append("lon")
+                    else:
+                        pair_selectors.append(0)
+                selected = _selected_grid_values(var, selectors, slice_axes)
+                paired = _selected_grid_values(pair_var, pair_selectors, pair_axes)
+                selected_fill = _nc_fill_values(var)
+                paired_fill = _nc_fill_values(pair_var)
+                role = render_meta.get("vector_role")
+                u_raw = selected if role == "u" else paired
+                v_raw = paired if role == "u" else selected
+                u_fill = selected_fill if role == "u" else paired_fill
+                v_fill = paired_fill if role == "u" else selected_fill
+                grid: list[list[float | None]] = []
+                u_grid: list[list[float | None]] = []
+                v_grid: list[list[float | None]] = []
+                flat: list[float] = []
+                for i, u_row_raw in enumerate(u_raw):
+                    out_row: list[float | None] = []
+                    out_u_row: list[float | None] = []
+                    out_v_row: list[float | None] = []
+                    for j, u_raw_value in enumerate(u_row_raw):
+                        v_raw_value = v_raw[i][j] if i < len(v_raw) and j < len(v_raw[i]) else None
+                        if _value_is_missing(u_raw_value, u_fill) or _value_is_missing(v_raw_value, v_fill):
+                            out_row.append(None)
+                            out_u_row.append(None)
+                            out_v_row.append(None)
+                            continue
+                        u_value = float(u_raw_value)
+                        v_value = float(v_raw_value)
+                        speed = math.hypot(u_value, v_value)
+                        out_row.append(round(speed, 4))
+                        out_u_row.append(round(u_value, 4))
+                        out_v_row.append(round(v_value, 4))
+                        flat.append(speed)
+                    grid.append(out_row)
+                    u_grid.append(out_u_row)
+                    v_grid.append(out_v_row)
+                if not flat:
+                    raise ValueError("selected region has no valid ocean vector data")
+                render_meta = {
+                    **render_meta,
+                    "category": "vector",
+                    "render_modes": ["heatmap", "particles", "contour", "points"],
+                    "particle_ready": True,
+                    "vector_components": {"u": variable if role == "u" else pair_name, "v": pair_name if role == "u" else variable},
+                }
+                grid, flat, masked_count = _apply_land_mask(path, render_meta, grid, lat_out, lon_out)
+                if not flat:
+                    raise ValueError("selected region has no valid ocean vector data after land mask")
+                u_grid, v_grid = _align_vectors_to_mask(grid, u_grid, v_grid)
+                return {
+                    "dataset": path.stem,
+                    "source": str(path),
+                    "variable": "speed",
+                    "source_variable": variable,
+                    "units": "m/s",
+                    "long_name": "Current speed",
+                    **render_meta,
+                    "bounds": {
+                        "west": min(west, east),
+                        "east": max(west, east),
+                        "south": min(south, north),
+                        "north": max(south, north),
+                    },
+                    "lats": [round(float(x), 4) for x in lat_out],
+                    "lons": [round(float(x), 4) for x in lon_out],
+                    "values": grid,
+                    "u_grid": u_grid,
+                    "v_grid": v_grid,
+                    "land_mask_applied": masked_count,
+                    "land_mask_source": str(LAND_MASK_NC) if masked_count else "",
+                    "step": step,
+                    "requested_step": requested_step,
+                    "auto_step": auto_step,
+                    "shape": {"lat": len(lat_out), "lon": len(lon_out)},
+                    "stats": {
+                        "min": round(min(flat), 4),
+                        "max": round(max(flat), 4),
+                        "mean": round(sum(flat) / len(flat), 4),
+                        "count": len(flat),
+                    },
+                }
+
+        values = _selected_grid_values(var, selectors, slice_axes)
+        fill_values = _nc_fill_values(var)
 
         grid: list[list[float | None]] = []
         flat: list[float] = []
@@ -811,11 +933,6 @@ def _query_grid_netcdf4(
             grid.append(out_row)
         if not flat:
             raise ValueError("selected region has no valid ocean data")
-        units = _jsonable(getattr(var, "units", ""))
-        long_name = _jsonable(getattr(var, "long_name", variable))
-        render_meta = _variable_render_meta(path.stem, variable, units, long_name, dims, set(nc.variables.keys()))
-        lat_out = [float(x) for x in lat_out]
-        lon_out = [float(x) for x in lon_out]
         grid, flat, masked_count = _apply_land_mask(path, render_meta, grid, lat_out, lon_out)
         if not flat:
             raise ValueError("selected region has no valid ocean data after land mask")
