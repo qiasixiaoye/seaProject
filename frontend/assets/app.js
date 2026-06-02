@@ -1,1465 +1,821 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// State
-// ─────────────────────────────────────────────────────────────────────────────
-const state = {
-  selection: null,
-  selectMode: false,
-  grid: null,
-  cesiumRect: null,
-  cesiumGrid: null,
-  renderMode: "heatmap",
-  renderAnim: null,
-  renderCanvas: null,
-  renderParticles: [],
-  mapRenderTick: 0,
-  rasterLayer: null,
-  datasets: [],
-  variableMeta: new Map(),
-  ragStatus: null,
-  domain: "auto",        // current domain tab selection
-  geoApiReady: false,    // whether geo-api (/geo-api/api/health) responded OK
-  streamEs: null,        // active EventSource for SSE
-  reportText: "",
+// Ocean Digital Earth — Vue 3 + Windy rendering + pixel-level land mask
+'use strict';
+window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/';
+const GEOSERVER_WMS_URL = '/geoserver/wms';
+const GEOSERVER_WFS_URL = '/geoserver/ows';
+const GEOSERVER_BASE_LAYER = 'ne:world';
+const GEOSERVER_LAND_LAYER = 'ne:countries';
+const LOCAL_EARTH_TEXTURE_URL = '/assets/earth-local.png';
+
+// ── WINDY COLOR SCALES ────────────────────────────────────────────────────────
+const WINDY_SCALES = {
+  temperature:[
+    [0.00,[36,40,148]],[0.10,[62,120,210]],[0.22,[90,185,240]],
+    [0.35,[140,230,200]],[0.50,[240,245,110]],[0.65,[255,185,50]],
+    [0.78,[255,110,30]],[0.90,[220,45,20]],[1.00,[150,15,10]]],
+  salinity:[
+    [0.00,[50,100,200]],[0.25,[70,160,230]],[0.50,[150,210,210]],
+    [0.75,[220,180,110]],[1.00,[170,80,30]]],
+  chlorophyll:[
+    [0.00,[13,8,60]],[0.20,[10,60,120]],[0.40,[0,120,100]],
+    [0.60,[30,180,60]],[0.80,[180,230,30]],[1.00,[240,240,40]]],
+  wave:[
+    [0.00,[10,20,80]],[0.25,[30,80,180]],[0.50,[80,160,240]],
+    [0.75,[180,220,255]],[1.00,[255,255,255]]],
+  wind:[
+    [0.00,[35,23,60]],[0.10,[22,52,120]],[0.22,[0,100,180]],
+    [0.35,[0,160,200]],[0.50,[0,220,180]],[0.65,[100,240,80]],
+    [0.75,[220,230,30]],[0.85,[255,160,0]],[0.95,[240,60,20]],[1.00,[180,0,80]]],
+  relief:[
+    [0.00,[8,24,80]],[0.25,[20,80,160]],[0.50,[60,140,200]],
+    [0.75,[140,200,220]],[1.00,[220,240,250]]],
+  default:[
+    [0.00,[29,78,216]],[0.25,[8,145,178]],[0.50,[34,197,94]],
+    [0.75,[253,224,71]],[1.00,[220,38,38]]],
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DOM refs
-// ─────────────────────────────────────────────────────────────────────────────
-const els = {
-  health:         document.getElementById("health"),
-  chatToggle:     document.getElementById("chatToggle"),
-  chatFab:        document.getElementById("chatFab"),
-  reportFab:      document.getElementById("reportFab"),
-  chatClose:      document.getElementById("chatClose"),
-  chatClear:      document.getElementById("chatClear"),
-  chatDrawer:     document.getElementById("chatDrawer"),
-  chatMessages:   document.getElementById("chatMessages"),
-  variable:       document.getElementById("variable"),
-  selectBtn:      document.getElementById("selectBtn"),
-  queryBtn:       document.getElementById("queryBtn"),
-  currentDemoBtn: document.getElementById("currentDemoBtn"),
-  clearBtn:       document.getElementById("clearBtn"),
-  stepInput:      document.getElementById("stepInput"),
-  maxPointsInput: document.getElementById("maxPointsInput"),
-  syncBtn:        document.getElementById("syncBtn"),
-  oceanStatus:    document.getElementById("oceanStatus"),
-  apiStatus:      document.getElementById("apiStatus"),
-  stats:          document.getElementById("stats"),
-  vmin:           document.getElementById("vmin"),
-  vmax:           document.getElementById("vmax"),
-  question:       document.getElementById("question"),
-  backend:        document.getElementById("backend"),
-  topk:           document.getElementById("topk"),
-  askBtn:         document.getElementById("askBtn"),
-  reportStatus:   document.getElementById("reportStatus"),
-  docs:           document.getElementById("docs"),
-  agentSummary:   document.getElementById("agentSummary"),
-  agentTrace:     document.getElementById("agentTrace"),
-  domainTabs:     document.getElementById("domainTabs"),
-  suggRow:        document.getElementById("suggRow"),
-  pipelineBar:    document.getElementById("pipelineBar"),
-  geoTag:         document.getElementById("geoTag"),
-  renderModeGroup: document.getElementById("renderModeGroup"),
-  reportDock:    document.getElementById("reportDock"),
-  reportBody:    document.getElementById("reportBody"),
-  reportMeta:    document.getElementById("reportMeta"),
-  reportClose:   document.getElementById("reportClose"),
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Domain config
-// ─────────────────────────────────────────────────────────────────────────────
-const DOMAIN_INFO = {
-  auto: {
-    label: "自动", icon: "🔮",
-    suggestions: [
-      "请评估当前框选区域的综合海洋环境状况",
-      "该海域近期有哪些主要风险？",
-    ],
-  },
-  marine: {
-    label: "海洋要素", icon: "🌊",
-    suggestions: [
-      "台湾海峡海表温度异常情况如何？",
-      "该海域叶绿素浓度偏高吗？",
-      "目前海表盐度是否正常？",
-    ],
-  },
-  stargazing: {
-    label: "观星", icon: "🌟",
-    suggestions: [
-      "今晚该海域适合观星吗？",
-      "这片区域光污染程度如何？",
-      "当前月相是否影响观星效果？",
-    ],
-  },
-  biology: {
-    label: "海洋生物", icon: "🐠",
-    suggestions: [
-      "这片海域有珊瑚白化风险吗？",
-      "目前是否有赤潮（有害藻华）风险？",
-      "该海域适合哪些鱼类栖息？",
-    ],
-  },
-  navigation: {
-    label: "航行安全", icon: "⚓",
-    suggestions: [
-      "台湾海峡适合小型渔船出海吗？",
-      "当前海况对集装箱船只安全吗？",
-      "近期浪高和风级评估如何？",
-    ],
-  },
-};
-
-// 关键词 → 领域，用于"自动"模式下本地推断
-const DOMAIN_KEYWORDS = {
-  stargazing: ["观星", "看星", "星星", "星空", "天文", "星座", "银河", "月相", "月亮",
-               "光污染", "暗天空", "夜空", "天象", "dark sky", "milky way", "astronomy"],
-  biology:    ["珊瑚", "白化", "鱼群", "藻华", "赤潮", "渔业", "生物多样性",
-               "藻类", "浮游", "生态", "coral", "bloom", "biodiversity", "marine life"],
-  navigation: ["航行", "船只", "渔船", "浪高", "风级", "海况", "航运", "港口",
-               "出海", "行船", "波高", "涌浪", "风浪", "安全出海",
-               "vessel", "wave", "maritime", "sailing"],
-  marine:     ["海温", "sst", "盐度", "叶绿素", "海浪", "海洋热浪", "海平面", "水温",
-               "海洋要素", "海表", "温度异常", "海流", "洋流",
-               "temperature", "salinity", "chlorophyll", "sea level"],
-};
-
-function guessDomain(question) {
-  const q = question.toLowerCase();
-  const scores = {};
-  for (const [d, kws] of Object.entries(DOMAIN_KEYWORDS)) {
-    scores[d] = kws.filter((k) => q.includes(k.toLowerCase())).length;
+function pickScale(d){
+  if(!d) return WINDY_SCALES.default;
+  const t=`${d.dataset||''} ${d.variable||''} ${d.long_name||''} ${d.units||''}`.toLowerCase();
+  if(d.category==='relief') return WINDY_SCALES.relief;
+  if(/sst|temperature|temp|thetao|analysed/.test(t)) return WINDY_SCALES.temperature;
+  if(/salinity|sss|psal/.test(t)) return WINDY_SCALES.salinity;
+  if(/chlor|chl/.test(t)) return WINDY_SCALES.chlorophyll;
+  if(/wave|swh|vhm0|significant/.test(t)) return WINDY_SCALES.wave;
+  if(/wind|speed|current|uwnd|vwnd|water_u|water_v/.test(t)) return WINDY_SCALES.wind;
+  return WINDY_SCALES.default;
+}
+function sampleScale(sc,t){
+  t=Math.max(0,Math.min(1,t));
+  for(let i=0;i<sc.length-1;i++){
+    const [t0,c0]=sc[i],[t1,c1]=sc[i+1];
+    if(t<=t1){const f=(t-t0)/Math.max(1e-9,t1-t0);return c0.map((v,k)=>Math.round(v+(c1[k]-v)*f));}
   }
-  const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
-  return best[1] > 0 ? best[0] : "marine";
+  return sc[sc.length-1][1];
+}
+const colorRgb=(t,d)=>sampleScale(pickScale(d),t);
+const colorAlpha=(t,a,d)=>{const [r,g,b]=colorRgb(t,d);return `rgba(${r},${g},${b},${a})`;};
+function legendCss(d){
+  const sc=pickScale(d);
+  return 'linear-gradient(90deg,'+sc.map(([t,[r,g,b]])=>`rgb(${r},${g},${b}) ${(t*100).toFixed(0)}%`).join(',')+')';
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Globe / map globals
-// ─────────────────────────────────────────────────────────────────────────────
-let viewer;
-let map;
-let selectionSource;
-let mapDragStart = null;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Boot
-// ─────────────────────────────────────────────────────────────────────────────
-boot();
-
-async function boot() {
-  if (!window.Cesium || !window.ol) {
-    els.health.textContent = "Cesium/OpenLayers 未加载，请检查前端网络依赖。";
-    return;
-  }
-  initCesium();
-  initOpenLayers();
-  bindEvents();
-  renderSuggestions();
-  await Promise.all([refreshHealth(), checkGeoApi(), refreshRagStatus(), loadDatasets()]);
+// ── GRID SAMPLING + PIXEL-LEVEL LAND MASK ────────────────────────────────────
+function isNull(v,d){
+  if(v===null||v===undefined||Number.isNaN(Number(v))) return true;
+  if(d?.category==='relief'&&v>0) return true;
+  return false;
+}
+/**
+ * land_mask_hires: row 0=south, row N=north (backend convention).
+ * Canvas: ny=0=top=north → must flip: lm_row = (1-ny)*(rows-1)
+ */
+function isHiresLand(d,nx,ny){
+  const lm=d?.land_mask_hires;
+  if(!lm||!lm.length) return false;
+  const rows=lm.length,cols=lm[0]?.length||0;
+  if(!rows||!cols) return false;
+  const li=Math.round(Math.max(0,Math.min(rows-1,(1-ny)*(rows-1))));
+  const lj=Math.round(Math.max(0,Math.min(cols-1,nx*(cols-1))));
+  return lm[li]?.[lj]===true;
+}
+function sampleGrid(values,nx,ny,d){
+  if(isHiresLand(d,nx,ny)) return null;
+  const rows=values.length,cols=values[0]?.length||0;
+  if(!rows||!cols) return null;
+  const x=Math.max(0,Math.min(cols-1,nx*(cols-1)));
+  const y=Math.max(0,Math.min(rows-1,ny*(rows-1)));
+  const ni=Math.round(y),nj=Math.round(x);
+  const vNN=values[ni]?.[nj];
+  if(isNull(vNN,d)) return null;
+  const j0=Math.floor(x),j1=Math.min(cols-1,j0+1);
+  const i0=Math.floor(y),i1=Math.min(rows-1,i0+1);
+  const v00=values[i0]?.[j0],v10=values[i0]?.[j1],v01=values[i1]?.[j0],v11=values[i1]?.[j1];
+  if([v00,v10,v01,v11].some(v=>isNull(v,d))) return vNN;
+  const fx=x-j0,fy=y-i0;
+  return (v00*(1-fx)+v10*fx)*(1-fy)+(v01*(1-fx)+v11*fx)*fy;
+}
+function sampleGridNN(values,nx,ny){
+  const rows=values.length,cols=values[0]?.length||0;
+  if(!rows||!cols) return null;
+  const i=Math.round(Math.max(0,Math.min(rows-1,ny*(rows-1))));
+  const j=Math.round(Math.max(0,Math.min(cols-1,nx*(cols-1))));
+  return values[i]?.[j]??null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GeoAgent health probe
-// ─────────────────────────────────────────────────────────────────────────────
-async function checkGeoApi() {
-  try {
-    const r = await fetch("/geo-api/api/health");
-    if (!r.ok) throw new Error("non-ok");
-    const d = await r.json();
-    state.geoApiReady = true;
-    els.geoTag.classList.add("online");
-    const llmConfigured = d.llm?.configured ?? d.llm_configured;
-    const llmModel = d.llm?.model ?? d.llm_model ?? "LLM未配置";
-    els.geoTag.title = `GeoAgent 在线 · ${llmConfigured ? llmModel : "LLM未配置"}`;
-    // 展示高级选项只作为备用
-    document.getElementById("advOpts").removeAttribute("open");
-  } catch {
-    state.geoApiReady = false;
-    els.geoTag.classList.remove("online");
-    els.geoTag.title = "GeoAgent 离线，将使用旧版 RAG API";
-  }
-}
+// ── CANVAS RENDERERS ──────────────────────────────────────────────────────────
+const mkCanvas=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cesium
-// ─────────────────────────────────────────────────────────────────────────────
-function initCesium() {
-  Cesium.Ion.defaultAccessToken = "";
-  viewer = new Cesium.Viewer("earth", {
-    animation: false,
-    baseLayer: false,
-    baseLayerPicker: false,
-    fullscreenButton: false,
-    geocoder: false,
-    homeButton: true,
-    infoBox: false,
-    sceneModePicker: false,
-    selectionIndicator: false,
-    timeline: false,
-    navigationHelpButton: false,
-    terrainProvider: new Cesium.EllipsoidTerrainProvider(),
-  });
-  viewer.imageryLayers.removeAll();
-  addEarthImagery();
-  viewer.scene.globe.enableLighting = true;
-  viewer.scene.globe.showGroundAtmosphere = true;
-  viewer.scene.skyAtmosphere.show = true;
-  viewer.scene.screenSpaceCameraController.enableTilt = true;
-  viewer.scene.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(145, 5, 16000000),
-  });
-
-  let start;
-  const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
-  handler.setInputAction((event) => {
-    if (!state.selectMode) return;
-    start = pickLonLat(event.position);
-  }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
-  handler.setInputAction((event) => {
-    if (!state.selectMode || !start) return;
-    const end = pickLonLat(event.endPosition);
-    if (end) setSelection(start, end);
-  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-  handler.setInputAction(() => {
-    start = null;
-  }, Cesium.ScreenSpaceEventType.LEFT_UP);
-}
-
-function addEarthImagery() {
-  viewer.imageryLayers.addImageryProvider(
-    new Cesium.SingleTileImageryProvider({
-      url: createFallbackEarthTexture(),
-      rectangle: Cesium.Rectangle.MAX_VALUE,
-    })
-  );
-  viewer.imageryLayers.addImageryProvider(
-    new Cesium.UrlTemplateImageryProvider({
-      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      credit: "OpenStreetMap contributors",
-      maximumLevel: 6,
-    })
-  );
-}
-
-function createFallbackEarthTexture() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 2048;
-  canvas.height = 1024;
-  const ctx = canvas.getContext("2d");
-  const ocean = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  ocean.addColorStop(0, "#0b2f5e");
-  ocean.addColorStop(0.5, "#0f6f9f");
-  ocean.addColorStop(1, "#09274e");
-  ctx.fillStyle = ocean;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = "rgba(255,255,255,.18)";
-  ctx.lineWidth = 1;
-  for (let lon = -180; lon <= 180; lon += 30) {
-    const x = ((lon + 180) / 360) * canvas.width;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-  }
-  for (let lat = -60; lat <= 60; lat += 30) {
-    const y = ((90 - lat) / 180) * canvas.height;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-  }
-  ctx.fillStyle = "#7fb069";
-  drawLand(ctx, [[-168,15],[-55,70],[-35,8],[-82,-55],[-120,-42],[-105,8]]);
-  drawLand(ctx, [[-18,35],[42,70],[102,58],[150,10],[104,-8],[45,-35],[6,-34]]);
-  drawLand(ctx, [[110,-10],[154,-10],[154,-44],[114,-44]]);
-  drawLand(ctx, [[-10,37],[35,34],[52,-34],[18,-35]]);
-  drawLand(ctx, [[-52,60],[-20,76],[8,60],[-20,52]]);
-  return canvas.toDataURL("image/png");
-}
-
-function drawLand(ctx, points) {
-  ctx.beginPath();
-  points.forEach(([lon, lat], index) => {
-    const x = ((lon + 180) / 360) * 2048;
-    const y = ((90 - lat) / 180) * 1024;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.closePath();
-  ctx.fill();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OpenLayers
-// ─────────────────────────────────────────────────────────────────────────────
-function initOpenLayers() {
-  selectionSource = new ol.source.Vector();
-  const selectionLayer = new ol.layer.Vector({
-    source: selectionSource,
-    style: new ol.style.Style({
-      stroke: new ol.style.Stroke({ color: "#facc15", width: 3 }),
-      fill: new ol.style.Fill({ color: "rgba(250, 204, 21, 0.12)" }),
-    }),
-  });
-  map = new ol.Map({
-    target: "map",
-    layers: [new ol.layer.Tile({ source: new ol.source.OSM() }), selectionLayer],
-    view: new ol.View({ center: ol.proj.fromLonLat([145, 5]), zoom: 2.8 }),
-  });
-  map.on("pointerdown", (event) => {
-    mapDragStart = ol.proj.toLonLat(event.coordinate);
-  });
-  map.on("pointerdrag", (event) => {
-    if (!mapDragStart) return;
-    const end = ol.proj.toLonLat(event.coordinate);
-    setSelection({ lon: mapDragStart[0], lat: mapDragStart[1] }, { lon: end[0], lat: end[1] });
-  });
-  map.on("pointerup", () => { mapDragStart = null; });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Events
-// ─────────────────────────────────────────────────────────────────────────────
-function bindEvents() {
-  els.chatToggle.addEventListener("click", openChat);
-  els.chatFab.addEventListener("click", openChat);
-  els.reportFab.addEventListener("click", toggleReportDock);
-  els.chatClose.addEventListener("click", closeChat);
-  els.chatClear.addEventListener("click", clearChat);
-  els.selectBtn.addEventListener("click", toggleSelectMode);
-  els.queryBtn.addEventListener("click", queryOcean);
-  els.currentDemoBtn?.addEventListener("click", runCurrentDemo);
-  els.clearBtn.addEventListener("click", clearSelection);
-  els.syncBtn.addEventListener("click", syncFiles);
-  els.askBtn.addEventListener("click", askAgent);
-  els.reportClose.addEventListener("click", hideReportDock);
-  els.variable.addEventListener("change", handleVariableChange);
-
-  els.renderModeGroup.querySelectorAll(".renderMode").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (btn.disabled) return;
-      els.renderModeGroup.querySelectorAll(".renderMode").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      state.renderMode = btn.dataset.mode || "heatmap";
-      if (state.grid) {
-        renderGridOnCesium(state.grid);
-        renderGridOnMap(state.grid);
-        els.oceanStatus.textContent = `已切换为${renderModeLabel(state.renderMode)}：${state.grid.dataset} / ${state.grid.long_name}`;
-      }
-    });
-  });
-
-  // Ctrl+Enter / Cmd+Enter 快捷发送
-  els.question.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      askAgent();
-    }
-  });
-
-  // 领域 Tab 切换
-  els.domainTabs.querySelectorAll(".domTab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      els.domainTabs.querySelectorAll(".domTab").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      state.domain = btn.dataset.domain;
-      renderSuggestions();
-    });
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Domain suggestions
-// ─────────────────────────────────────────────────────────────────────────────
-function renderSuggestions() {
-  const info = DOMAIN_INFO[state.domain];
-  els.suggRow.innerHTML = (info.suggestions || []).map((s) =>
-    `<button class="suggChip" onclick="setQuestion(this.textContent)">${escapeHtml(s)}</button>`
-  ).join("");
-}
-
-function setQuestion(text) {
-  els.question.value = text;
-  els.question.focus();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Chat open / close / clear
-// ─────────────────────────────────────────────────────────────────────────────
-function openChat() {
-  els.chatDrawer.classList.add("open");
-  document.body.classList.add("chat-open");
-}
-function closeChat() {
-  els.chatDrawer.classList.remove("open");
-  document.body.classList.remove("chat-open");
-}
-
-function showReportDock(meta = "报告生成中...") {
-  els.reportDock.classList.add("open");
-  els.reportFab.classList.add("open");
-  els.reportMeta.textContent = meta;
-}
-
-function hideReportDock() {
-  els.reportDock.classList.remove("open");
-  els.reportFab.classList.remove("open");
-}
-
-function toggleReportDock() {
-  if (els.reportDock.classList.contains("open")) {
-    hideReportDock();
-  } else {
-    showReportDock(state.reportText ? els.reportMeta.textContent : "等待生成。");
-  }
-}
-
-function setReportText(text, streaming = false) {
-  state.reportText = text || "";
-  els.reportBody.textContent = text || "";
-  els.reportBody.classList.toggle("streaming", streaming);
-  els.reportFab.classList.toggle("ready", Boolean(state.reportText));
-  els.reportBody.scrollTop = els.reportBody.scrollHeight;
-}
-
-function clearChat() {
-  // Cancel any running stream
-  if (state.streamEs) { state.streamEs.close(); state.streamEs = null; }
-  els.chatMessages.innerHTML = "";
-  appendMessage("ai", "对话已清空。可以继续询问海洋要素、风险评估或规划建议。");
-  els.docs.innerHTML = "";
-  els.agentTrace.innerHTML = "";
-  renderAgentSummary(null);
-  els.reportStatus.textContent = "等待提问。";
-  els.reportMeta.textContent = "等待生成。";
-  setReportText("");
-  hideReportDock();
-  hidePipeline();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pipeline bar helpers
-// ─────────────────────────────────────────────────────────────────────────────
-const PIPELINE_STEPS = ["intent", "retrieval", "context", "reasoning", "report"];
-
-function showPipeline() { els.pipelineBar.classList.add("visible"); }
-function hidePipeline() {
-  els.pipelineBar.classList.remove("visible");
-  PIPELINE_STEPS.forEach((s) => {
-    const el = document.getElementById("ps-" + s);
-    if (el) el.className = "pStep";
-  });
-}
-
-function setPipelineStep(id, status) {
-  // status: "active" | "done" | ""
-  const el = document.getElementById("ps-" + id);
-  if (el) el.className = "pStep " + status;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main ask dispatcher — routes to GeoAgent (SSE) or legacy RAG API
-// ─────────────────────────────────────────────────────────────────────────────
-async function askAgent() {
-  openChat();
-  const question = els.question.value.trim();
-  if (!question) return;
-
-  // Cancel previous stream if any
-  if (state.streamEs) { state.streamEs.close(); state.streamEs = null; }
-
-  appendMessage("user", question);
-  els.askBtn.disabled = true;
-
-  if (state.geoApiReady) {
-    await askGeoAgent(question);
-  } else {
-    await askLegacyAgent(question);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GeoAgent — SSE streaming
-// ─────────────────────────────────────────────────────────────────────────────
-async function askGeoAgent(question) {
-  const domain = state.domain === "auto" ? guessDomain(question) : state.domain;
-  const bbox = state.selection || null;
-
-  els.reportStatus.textContent = `GeoAgent · ${DOMAIN_INFO[domain]?.icon || ""} ${DOMAIN_INFO[domain]?.label || domain} · 分析中...`;
-  els.docs.innerHTML = "";
-  els.agentTrace.innerHTML = "";
-  renderAgentSummary({ status: "running", domain });
-
-  showPipeline();
-  setPipelineStep("intent", "active");
-
-  // Create a streaming AI message bubble
-  const aiMsg = appendMessage("ai", "");
-  aiMsg.classList.add("streaming");
-  aiMsg.classList.add("reportPreview");
-  let streamBuffer = "";
-  showReportDock(`GeoAgent · ${DOMAIN_INFO[domain]?.label || domain} · 生成中`);
-  setReportText("", true);
-
-  const params = new URLSearchParams({ question, domain });
-  if (bbox) params.set("bbox", JSON.stringify(bbox));
-
-  const es = new EventSource(`/geo-api/api/geo/stream?${params}`);
-  state.streamEs = es;
-
-  es.onmessage = (e) => {
-    let msg;
-    try { msg = JSON.parse(e.data); } catch { return; }
-    const { type } = msg;
-    const payload = msg.data ?? msg.content;
-    const message = msg.message ?? msg.content;
-    const usage = msg.usage ?? msg.token_usage;
-
-    if (type === "domain") {
-      // domain confirmed by backend
-    }
-    else if (type === "intent") {
-      setPipelineStep("intent", "done");
-      setPipelineStep("retrieval", "active");
-      setPipelineStep("context", "active");
-      if (payload) {
-        renderAgentSummary({
-          status: "running",
-          domain: payload.domain || domain,
-          intent_type: payload.intent_type,
-          topics: payload.topics,
-        });
-      }
-    }
-    else if (type === "context") {
-      setPipelineStep("context", "done");
-      setPipelineStep("retrieval", "done");
-      setPipelineStep("reasoning", "active");
-      if (payload) appendContextChip(payload);
-    }
-    else if (type === "analysis") {
-      setPipelineStep("reasoning", "done");
-      setPipelineStep("report", "active");
-    }
-    else if (type === "revision") {
-      // Critic requested a revision — briefly flash the report step
-      setPipelineStep("report", "active");
-      appendGeoTraceItem("🔄 Critic 修订", "报告未通过审查，正在修订...");
-    }
-    else if (type === "token") {
-      // Stream token into the AI message bubble
-      if (payload) {
-        streamBuffer += payload;
-        aiMsg.textContent = streamBuffer;
-        // Re-add blinking cursor
-        const cur = document.createElement("span");
-        cur.className = "streamCursor";
-        aiMsg.appendChild(cur);
-        setReportText(streamBuffer, true);
-        els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
-      }
-    }
-    else if (type === "done") {
-      // Finalize
-      aiMsg.classList.remove("streaming");
-      aiMsg.textContent = streamBuffer;   // remove cursor
-      setReportText(streamBuffer, false);
-      els.reportMeta.textContent = `完成 · ${DOMAIN_INFO[domain]?.label || domain}`;
-      setPipelineStep("report", "done");
-      hidePipeline();
-      els.reportStatus.textContent = `完成 · ${DOMAIN_INFO[domain]?.icon || ""} ${DOMAIN_INFO[domain]?.label || domain}`;
-      renderAgentSummary({ status: "done", domain, usage });
-      els.askBtn.disabled = false;
-      state.streamEs = null;
-      es.close();
-    }
-    else if (type === "error") {
-      aiMsg.classList.remove("streaming");
-      aiMsg.textContent = `分析失败：${message || "未知错误"}`;
-      setReportText(`分析失败：${message || "未知错误"}`, false);
-      els.reportMeta.textContent = "生成失败";
-      aiMsg.classList.add("error");
-      hidePipeline();
-      els.reportStatus.textContent = "生成失败。";
-      els.askBtn.disabled = false;
-      state.streamEs = null;
-      es.close();
-    }
-  };
-
-  es.onerror = () => {
-    if (!streamBuffer) {
-      // Never got any tokens — hard failure
-      aiMsg.classList.remove("streaming");
-      aiMsg.textContent = "连接 GeoAgent 失败，正在切换到旧版 API…";
-      setReportText("连接 GeoAgent 失败，正在切换到旧版 API…", false);
-      aiMsg.classList.add("warn");
-      state.geoApiReady = false;
-      els.geoTag.classList.remove("online");
-      hidePipeline();
-      es.close();
-      state.streamEs = null;
-      // Retry with legacy
-      askLegacyAgent(els.question.value.trim());
-    } else {
-      // Got some tokens then disconnected — treat as done
-      aiMsg.classList.remove("streaming");
-      aiMsg.textContent = streamBuffer;
-      setReportText(streamBuffer, false);
-      els.reportMeta.textContent = "完成（连接中断）";
-      hidePipeline();
-      els.reportStatus.textContent = "完成（连接中断）";
-      els.askBtn.disabled = false;
-      state.streamEs = null;
-    }
-  };
-}
-
-function appendContextChip(contextData) {
-  const vars = (contextData.variables_queried || []).join("、") || "无";
-  appendGeoTraceItem("📊 海洋数据", `已查询变量：${vars}`);
-}
-
-function appendGeoTraceItem(title, detail) {
-  const div = document.createElement("div");
-  div.className = "traceItem";
-  div.innerHTML = `
-    <span class="traceDot"></span>
-    <div><b>${escapeHtml(title)}</b><p>${escapeHtml(detail)}</p></div>
-  `;
-  els.agentTrace.appendChild(div);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Legacy RAG pipeline (original code, unchanged logic)
-// ─────────────────────────────────────────────────────────────────────────────
-async function askLegacyAgent(question) {
-  els.reportStatus.textContent = "多 Agent 报告生成中...";
-  els.docs.innerHTML = "";
-  els.agentTrace.innerHTML = "";
-  renderAgentSummary({ status: "running" });
-  const loading = appendMessage("ai", "正在进行意图凝练、RAG 检索、证据筛选、报告生成和 Critic 审查");
-  loading.classList.add("loading");
-  loading.classList.add("reportPreview");
-  showReportDock("旧版多 Agent · 生成中");
-  setReportText("正在进行意图凝练、RAG 检索、证据筛选、报告生成和 Critic 审查", true);
-  const started = performance.now();
-  try {
-    const data = await fetchJson("/api/agents/report", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question: buildAgentQuestion(question),
-        backend: els.backend.value,
-        top_k: Number(els.topk.value),
-        max_revisions: 0,
-        trace: true,
-        region: state.selection || null,
-        variables: state.grid ? [state.grid.variable] : [],
-      }),
-    });
-    loading.remove();
-    els.reportStatus.textContent = `完成：${data.backend} RAG + ${data.llm?.configured ? data.llm.model : "local fallback"}；${Math.round(performance.now() - started)} ms`;
-    appendMessage("ai", data.report);
-    setReportText(data.report, false);
-    els.reportMeta.textContent = `完成 · ${data.backend} RAG`;
-    renderAgentSummary(data);
-    renderTrace(data.trace || []);
-    renderEvidence(data);
-    await refreshRagStatus();
-  } catch (error) {
-    loading.remove();
-    els.reportStatus.textContent = "生成失败。";
-    appendMessage("ai", `生成失败：${error.message}`);
-    setReportText(`生成失败：${error.message}`, false);
-    els.reportMeta.textContent = "生成失败";
-    renderAgentSummary({ status: "failed", error: error.message });
-  } finally {
-    els.askBtn.disabled = false;
-  }
-}
-
-function buildAgentQuestion(question) {
-  const extra = [];
-  if (state.selection) {
-    const b = state.selection;
-    extra.push(`当前框选区域：经度 ${b.west.toFixed(2)} 至 ${b.east.toFixed(2)}，纬度 ${b.south.toFixed(2)} 至 ${b.north.toFixed(2)}。`);
-  }
-  if (state.grid) {
-    extra.push(`当前已渲染要素：${state.grid.long_name}(${state.grid.variable})，单位 ${state.grid.units || "-"}，均值 ${state.grid.stats.mean}，最小 ${state.grid.stats.min}，最大 ${state.grid.stats.max}，有效格点 ${state.grid.stats.count}。`);
-  }
-  return extra.length ? `${question}\n\n请同时参考以下空间数据上下文：\n${extra.join("\n")}` : question;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Agent summary chips  (handles both GeoAgent and legacy data)
-// ─────────────────────────────────────────────────────────────────────────────
-function renderAgentSummary(data) {
-  const rag = state.ragStatus?.ragflow;
-  const local = state.ragStatus?.local;
-
-  const chips = [
-    chip(state.geoApiReady ? "GeoAgent" : "RAG API",
-         state.geoApiReady ? "在线" : "旧版",
-         state.geoApiReady ? "cyan" : "dim"),
-    chip("LLM",
-         state.ragStatus?.llm?.configured ? state.ragStatus.llm.model : "local fallback",
-         "cyan"),
-  ];
-
-  if (!state.geoApiReady) {
-    chips.push(chip("RAGFlow", rag?.configured ? `${rag.dataset_ids.length} datasets` : "未绑定", rag?.configured ? "cyan" : "warn"));
-    chips.push(chip("Local Docs", local ? `${local.document_count}` : "-", "cyan"));
-  }
-
-  if (data?.domain && data.domain !== "auto") {
-    const info = DOMAIN_INFO[data.domain] || {};
-    chips.push(chip("领域", `${info.icon || ""} ${info.label || data.domain}`, "cyan"));
-  }
-  if (data?.intent_type) {
-    chips.push(chip("意图", data.intent_type, "dim"));
-  }
-  if ((data?.topics || []).length) {
-    chips.push(chip("主题", data.topics.slice(0, 3).join("、"), "dim"));
-  }
-  if (data?.usage) {
-    const u = data.usage;
-    chips.push(chip("Tokens", `${(u.input_tokens || 0) + (u.output_tokens || 0)}`, "dim"));
-    if (u.estimated_cost_usd) {
-      chips.push(chip("费用", `$${u.estimated_cost_usd.toFixed(5)}`, "dim"));
+function gridCanvas(data,W,H,alphaScale=1.0){
+  const c=mkCanvas(W,H),ctx=c.getContext('2d');
+  const img=ctx.createImageData(W,H),px=img.data;
+  const {min,max}=data.stats,range=Math.max(1e-9,max-min);
+  for(let y=0;y<H;y++){
+    const ny=H<=1?0:y/(H-1);
+    for(let x=0;x<W;x++){
+      const nx=W<=1?0:x/(W-1);
+      const v=sampleGrid(data.values,nx,ny,data);
+      if(v===null) continue;
+      const [r,g,b]=colorRgb((v-min)/range,data),k=(y*W+x)*4;
+      px[k]=r;px[k+1]=g;px[k+2]=b;px[k+3]=Math.floor(200*alphaScale);
     }
   }
-  // Legacy fields
-  if (data?.task_id) {
-    chips.push(chip("Task", data.task_id, "dim"));
-    chips.push(chip("Critic", data.critic?.passed === false ? "需修订" : "通过",
-                    data.critic?.passed === false ? "warn" : "cyan"));
-    chips.push(chip("Revision", String(data.revisions || 0), "dim"));
-    if ((data.risk_hypotheses || []).length) chips.push(chip("Risk", String(data.risk_hypotheses.length), "warn"));
-  } else if (data?.status === "running") {
-    chips.push(chip("Pipeline", "running", "warn"));
-  } else if (data?.status === "failed") {
-    chips.push(chip("Pipeline", "failed", "warn"));
+  ctx.putImageData(img,0,0);return c;
+}
+
+function pointCanvas(data,W,H){
+  const c=mkCanvas(W,H),ctx=c.getContext('2d');
+  const rows=data.values.length,cols=data.values[0]?.length||0;
+  const {min,max}=data.stats,range=Math.max(1e-9,max-min);
+  const skip=Math.max(1,Math.ceil(Math.max(rows,cols)/50));
+  for(let i=0;i<rows;i+=skip) for(let j=0;j<cols;j+=skip){
+    const nx=cols<=1?0:j/(cols-1),ny=rows<=1?0:i/(rows-1);
+    if(isHiresLand(data,nx,ny)) continue;
+    const v=data.values[i][j];if(isNull(v,data)) continue;
+    const t=(v-min)/range,r=2.5+t*8;
+    ctx.beginPath();ctx.fillStyle=colorAlpha(t,0.78,data);
+    ctx.arc(((j+.5)/cols)*W,((i+.5)/rows)*H,r,0,Math.PI*2);
+    ctx.fill();ctx.strokeStyle='rgba(255,255,255,0.38)';ctx.lineWidth=0.8;ctx.stroke();
   }
-
-  els.agentSummary.innerHTML = chips.join("");
+  return c;
 }
 
-function chip(label, value, tone) {
-  return `<span class="chip ${tone || ""}"><small>${escapeHtml(label)}</small>${escapeHtml(value || "-")}</span>`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Legacy trace / evidence (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
-function renderTrace(trace) {
-  els.agentTrace.innerHTML = trace.map((event) => {
-    const title = event.agent || event.node || "Agent";
-    const meta = summarizeEvent(event);
-    return `<div class="traceItem">
-      <span class="traceDot"></span>
-      <div><b>${escapeHtml(title)}</b><p>${escapeHtml(meta)}</p></div>
-      <time>${escapeHtml(String(event.t_ms ?? ""))} ms</time>
-    </div>`;
-  }).join("");
-}
-
-function summarizeEvent(event) {
-  if (event.node) {
-    return summarizeGeoNodeEvent(event);
-  }
-  if (event.agent === "IntentAgent") {
-    const topics = event.output?.topics || [];
-    return `意图=${event.output?.intent || "-"}；主题=${topics.join("、") || "-"}`;
-  }
-  if (event.agent === "RetrievalAgent") {
-    const tc = event.tool_calls != null ? `；工具调用=${event.tool_calls}` : "";
-    return `模式=${event.mode || "-"}；后端=${event.backend || "-"}；候选=${event.candidate_count || 0}${tc}`;
-  }
-  if (event.agent === "ContextAgent") {
-    if (event.mode === "skip") return event.note || "跳过(无区域)";
-    const stats = (event.stats || []).map((s) => `${s.variable}=${s.mean}`).join("、");
-    return `区域要素：${stats || (event.variables || []).join("、") || "-"}`;
-  }
-  if (event.agent === "DomainReasoningAgent") {
-    return `模式=${event.mode || "-"}；风险假设=${(event.hypotheses || []).length}`;
-  }
-  if (event.agent === "ScreeningAgent") {
-    const decisions = event.decisions || [];
-    const kept = decisions.filter((x) => x.decision === "keep").length;
-    return `模式=${event.mode || "-"}；保留=${kept}；过滤=${Math.max(0, decisions.length - kept)}`;
-  }
-  if (event.agent === "ReportAgent") {
-    return `${event.revised ? "按 Critic 意见修订" : "生成初稿"}；长度=${event.chars || 0}`;
-  }
-  if (event.agent === "CriticAgent") {
-    return `审查=${event.passed === false ? "未通过" : "通过"}；问题=${(event.issues || []).length}`;
-  }
-  return event.status || event.mode || "完成";
-}
-
-function summarizeGeoNodeEvent(event) {
-  if (event.node === "IntentNode") {
-    return `模式=${event.mode || "-"}；领域=${event.domain || "-"}`;
-  }
-  if (event.node === "RetrievalNode") {
-    return `模式=${event.mode || "-"}；后端=${event.backend || "-"}；候选=${event.count || 0}`;
-  }
-  if (event.node === "ContextNode") {
-    if (event.mode === "skipped") return event.reason || "跳过";
-    return `变量=${(event.vars_queried || []).join("、") || "-"}；成功=${event.vars_ok ?? 0}`;
-  }
-  if (event.node === "ScreeningNode") {
-    return `模式=${event.mode || "-"}；保留=${event.kept ?? 0}；过滤=${event.passed ?? 0}`;
-  }
-  if (event.node === "ReasoningNode") {
-    return `领域=${event.domain || "-"}；风险假设=${event.hypotheses_count ?? 0}`;
-  }
-  if (event.node === "ReportNode") {
-    return `${event.revised ? "按 Critic 意见修订" : "生成初稿"}；长度=${event.chars || 0}`;
-  }
-  if (event.node === "CriticNode") {
-    return `审查=${event.passed === false ? "未通过" : "通过"}；问题=${(event.issues || []).length}`;
-  }
-  return event.status || event.mode || "完成";
-}
-
-function renderEvidence(data) {
-  const kept = (data.kept_documents || []).map((doc) => ({ ...doc, decision: "keep" }));
-  const passed = (data.passed_documents || []).map((doc) => ({ ...doc, decision: "pass" }));
-  const docs = [...kept, ...passed];
-  els.docs.innerHTML = docs.map((doc) => `
-    <article class="doc ${doc.decision}">
-      <div class="docTop">
-        <b>${escapeHtml(doc.title)}</b>
-        <span>${doc.decision === "keep" ? "KEEP" : "PASS"}</span>
-      </div>
-      <p>${escapeHtml(evidenceMeta(doc))}</p>
-      <p>${escapeHtml(doc.reason || doc.abstract || "无筛选理由").slice(0, 260)}</p>
-      ${doc.source ? `<p class="docSource">${escapeHtml(doc.source)}</p>` : ""}
-    </article>
-  `).join("");
-}
-
-function evidenceMeta(doc) {
-  const meta = doc.metadata || {};
-  const parts = [doc.kind || doc.backend || "document", `score=${doc.decision_score || doc.score || 0}`];
-  if (meta.dataset_name) parts.push(meta.dataset_name);
-  if (meta.dataset_language) parts.push(meta.dataset_language);
-  if (meta.pages?.length) parts.push(`p.${meta.pages.join(",")}`);
-  if (meta.vector_similarity) parts.push(`vec=${Number(meta.vector_similarity).toFixed(3)}`);
-  if (meta.term_similarity) parts.push(`term=${Number(meta.term_similarity).toFixed(3)}`);
-  return parts.join(" · ");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Ocean layer / selection / stats (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
-function toggleSelectMode() {
-  state.selectMode = !state.selectMode;
-  els.selectBtn.classList.toggle("active", state.selectMode);
-  els.selectBtn.textContent = state.selectMode ? "退出" : "框选";
-  document.getElementById("earth").classList.toggle("selecting", state.selectMode);
-  viewer.scene.screenSpaceCameraController.enableRotate = !state.selectMode;
-  viewer.scene.screenSpaceCameraController.enableTranslate = !state.selectMode;
-  els.oceanStatus.textContent = state.selectMode
-    ? "框选模式已开启：在地球或右下角二维图上拖拽。"
-    : "地球浏览模式：可旋转、缩放和定位。";
-}
-
-async function refreshHealth() {
-  const data = await fetchJson("/api/health");
-  els.health.textContent = `API=${data.status} | LLM=${data.llm.configured ? data.llm.model : "未配置"} | GeoServer=${data.geoserver.public_url}`;
-  els.apiStatus.textContent = `接口：GET /api/health 已连接；LLM=${data.llm.configured ? data.llm.model : "local fallback"}。`;
-}
-
-async function refreshRagStatus() {
-  const data = await fetchJson("/api/rag/status");
-  state.ragStatus = data;
-  renderAgentSummary(null);
-}
-
-async function loadDatasets() {
-  const data = await fetchJson("/api/ocean/datasets");
-  state.datasets = data.datasets || [];
-  state.variableMeta = new Map();
-  const options = [];
-  for (const dataset of state.datasets) {
-    for (const variable of dataset.variables || []) {
-      const res = dataset.resolution?.lat && dataset.resolution?.lon
-        ? ` | ${dataset.resolution.lat}x${dataset.resolution.lon}°` : "";
-      const step = variable.recommended_step || dataset.recommended_step || 1;
-      const value = `${dataset.id}::${variable.name}`;
-      const meta = { ...variable, dataset: dataset.id, dataset_resolution: dataset.resolution || {} };
-      state.variableMeta.set(value, meta);
-      const category = renderCategoryLabel(meta);
-      options.push(`<option value="${escapeAttr(value)}">${escapeHtml(dataset.id)} / ${escapeHtml(variable.name)} - ${escapeHtml(variable.long_name || variable.name)} | ${category}${res} | step≥${step}</option>`);
-    }
-  }
-  els.variable.innerHTML = options.join("");
-  updateRenderModeAvailability();
-}
-
-function handleVariableChange() {
-  stopRenderAnimation();
-  state.grid = null;
-  clearGrid();
-  drawSelection();
-  updateRenderModeAvailability();
-  const meta = selectedVariableMeta();
-  els.oceanStatus.textContent = `已切换变量：${meta?.dataset || "-"} / ${meta?.long_name || meta?.name || "-"}。点击“渲染”后读取 NetCDF。`;
-  els.apiStatus.textContent = "接口：仅切换变量，尚未请求后端。";
-}
-
-function selectedVariableMeta() {
-  return state.variableMeta.get(els.variable.value) || null;
-}
-
-function renderCategoryLabel(meta) {
-  if (!meta) return "标量";
-  if (meta.category === "relief") return "地形/水深";
-  if (meta.category === "vector_component") return meta.particle_ready ? "矢量/粒子" : "矢量分量";
-  const text = `${meta.name || ""} ${meta.long_name || ""}`.toLowerCase();
-  if (text.includes("chlor")) return "叶绿素";
-  if (text.includes("salinity") || text.includes("sss")) return "盐度";
-  if (text.includes("sst") || text.includes("temperature")) return "温度";
-  if (text.includes("wave") || text.includes("swell")) return "海浪";
-  return "标量";
-}
-
-function allowedRenderModes(meta) {
-  const modes = meta?.render_modes?.length ? meta.render_modes : ["heatmap", "contour", "points"];
-  return new Set(modes);
-}
-
-function updateRenderModeAvailability() {
-  const meta = selectedVariableMeta();
-  const allowed = allowedRenderModes(meta);
-  if (!allowed.has(state.renderMode)) {
-    state.renderMode = "heatmap";
-  }
-  els.renderModeGroup.querySelectorAll(".renderMode").forEach((btn) => {
-    const mode = btn.dataset.mode || "heatmap";
-    const enabled = allowed.has(mode);
-    btn.disabled = !enabled;
-    btn.classList.toggle("active", mode === state.renderMode);
-    if (enabled) {
-      btn.title = {
-        heatmap: "连续填色栅格",
-        particles: "真实 u/v 矢量场粒子流",
-        contour: "等值线叠加",
-        points: "采样点符号图",
-      }[mode] || "";
-    } else if (mode === "particles") {
-      btn.title = meta?.vector_pair
-        ? "已识别到矢量分量；接入 u/v 联合查询后开放粒子流"
-        : "粒子流只对真实 u/v 风场或海流开放";
-    } else if (!enabled) {
-      btn.title = "当前变量不适合该渲染方式";
-    }
-  });
-}
-
-async function syncFiles() {
-  const started = performance.now();
-  const data = await fetchJson("/api/sync", { method: "POST" });
-  els.oceanStatus.textContent = `已同步 ${data.files.length} 个本地 NC/PDF 文件。`;
-  els.apiStatus.textContent = `接口：POST /api/sync，用时 ${Math.round(performance.now() - started)} ms。`;
-  await Promise.all([loadDatasets(), refreshRagStatus()]);
-}
-
-function pickLonLat(position) {
-  const cartesian = viewer.camera.pickEllipsoid(position, viewer.scene.globe.ellipsoid);
-  if (!cartesian) return null;
-  const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-  return {
-    lon: Cesium.Math.toDegrees(cartographic.longitude),
-    lat: Cesium.Math.toDegrees(cartographic.latitude),
-  };
-}
-
-function setSelection(a, b) {
-  const west  = Math.max(-180, Math.min(a.lon, b.lon));
-  const east  = Math.min(180,  Math.max(a.lon, b.lon));
-  const south = Math.max(-90,  Math.min(a.lat, b.lat));
-  const north = Math.min(90,   Math.max(a.lat, b.lat));
-  if (Math.abs(east - west) < 0.1 || Math.abs(north - south) < 0.1) return;
-  state.selection = { west, east, south, north };
-  state.grid = null;
-  clearGrid();
-  drawSelection();
-  els.oceanStatus.textContent = `已框选：经度 ${west.toFixed(2)} 至 ${east.toFixed(2)}，纬度 ${south.toFixed(2)} 至 ${north.toFixed(2)}。`;
-  els.apiStatus.textContent = '接口：仅更新前端框选，尚未请求后端。点击“渲染”后才读取 NetCDF。';
-}
-
-function drawSelection() {
-  if (!state.selection) return;
-  const b = state.selection;
-  if (state.cesiumRect) viewer.entities.remove(state.cesiumRect);
-  state.cesiumRect = viewer.entities.add({
-    rectangle: {
-      coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north),
-      material: Cesium.Color.YELLOW.withAlpha(0.16),
-      outline: true,
-      outlineColor: Cesium.Color.YELLOW,
-      outlineWidth: 3,
-    },
-  });
-  selectionSource.clear();
-  const polygon = ol.geom.Polygon.fromExtent(
-    ol.proj.transformExtent([b.west, b.south, b.east, b.north], "EPSG:4326", "EPSG:3857")
-  );
-  selectionSource.addFeature(new ol.Feature(polygon));
-}
-
-async function queryOcean() {
-  if (!state.selection) {
-    els.oceanStatus.textContent = "请先开启框选并选择一个区域。";
-    return;
-  }
-  updateRenderModeAvailability();
-  const [dataset, variable] = els.variable.value.split("::");
-  if (!allowedRenderModes(selectedVariableMeta()).has(state.renderMode)) {
-    state.renderMode = "heatmap";
-    updateRenderModeAvailability();
-  }
-  const step = Math.max(0, Number(els.stepInput.value || 0));
-  const maxPoints = Math.max(100, Math.min(50000, Number(els.maxPointsInput.value || 9000)));
-  els.oceanStatus.textContent = "正在读取 NetCDF 并生成区域栅格...";
-  const started = performance.now();
-  els.apiStatus.textContent = `接口：POST /api/ocean/query 请求中；step=${step || "auto"}，max_points=${maxPoints}。`;
-  try {
-    const data = await fetchJson("/api/ocean/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataset, variable, bounds: state.selection, step, max_points: maxPoints }),
-    });
-    state.grid = data;
-    renderStats(data);
-    renderGridOnCesium(data);
-    renderGridOnMap(data);
-    els.oceanStatus.textContent = `已渲染 ${data.dataset} / ${data.long_name}`;
-    els.apiStatus.textContent = `接口：POST /api/ocean/query；后端切片读取 ${data.source}；step=${data.step}；格点=${data.shape?.lat || data.values.length}x${data.shape?.lon || data.values[0]?.length || 0}；用时 ${Math.round(performance.now() - started)} ms。`;
-  } catch (error) {
-    clearGrid();
-    els.oceanStatus.textContent = `未渲染：${error.message}。请确认框选区域与所选数据集覆盖范围相交，或调大步长/降低格点上限。`;
-    els.apiStatus.textContent = `接口：POST /api/ocean/query 失败；用时 ${Math.round(performance.now() - started)} ms。`;
-  }
-}
-
-async function runCurrentDemo() {
-  const value = "hycom_luzon_uv_surface_20240905::water_u";
-  const option = Array.from(els.variable.options).find((item) => item.value === value);
-  if (!option) {
-    els.oceanStatus.textContent = "未找到 HYCOM 海流样例，请先确认 hycom_luzon_uv_surface_20240905.nc 已在 data/nc_uploads 中。";
-    return;
-  }
-  els.variable.value = value;
-  state.renderMode = "particles";
-  els.stepInput.value = "1";
-  els.maxPointsInput.value = "9000";
-  setSelection({ lon: 117, lat: 18 }, { lon: 127, lat: 26 });
-  updateRenderModeAvailability();
-  await queryOcean();
-}
-
-function clearSelection() {
-  state.selection = null;
-  state.grid = null;
-  clearGrid();
-  if (state.cesiumRect) viewer.entities.remove(state.cesiumRect);
-  state.cesiumRect = null;
-  selectionSource.clear();
-  els.oceanStatus.textContent = "已擦除框选与渲染图层；地球可继续旋转浏览。";
-  els.apiStatus.textContent = "接口：擦除为前端操作，未请求后端。";
-}
-
-function renderStats(data) {
-  els.vmin.textContent = `${data.stats.min} ${data.units || ""}`;
-  els.vmax.textContent = `${data.stats.max} ${data.units || ""}`;
-  els.stats.innerHTML = [
-    ["最小", data.stats.min], ["最大", data.stats.max], ["均值", data.stats.mean],
-    ["格点", data.stats.count], ["步长", data.step || 1],
-  ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${escapeHtml(String(v))}</b></div>`).join("");
-}
-
-function renderGridOnCesium(data) {
-  if (state.cesiumGrid) viewer.entities.remove(state.cesiumGrid);
-  stopRenderAnimation();
-  const canvas = renderCanvas(data, 900, 540, state.renderMode);
-  const b = data.bounds;
-  state.renderCanvas = canvas;
-  state.cesiumGrid = viewer.entities.add({
-    rectangle: {
-      coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north),
-      material: new Cesium.ImageMaterialProperty({ image: canvas, transparent: true }),
-    },
-  });
-  if (state.renderMode === "particles") {
-    startParticleAnimation(data, canvas);
-  }
-}
-
-function renderGridOnMap(data) {
-  if (state.rasterLayer) map.removeLayer(state.rasterLayer);
-  const b = data.bounds;
-  const extent = ol.proj.transformExtent([b.west, b.south, b.east, b.north], "EPSG:4326", "EPSG:3857");
-  const canvas = renderCanvas(data, 900, 540, state.renderMode);
-  state.rasterLayer = new ol.layer.Image({
-    source: new ol.source.ImageStatic({
-      url: canvas.toDataURL("image/png"),
-      imageExtent: extent,
-      projection: "EPSG:3857",
-    }),
-    opacity: state.renderMode === "particles" ? 0.9 : 0.78,
-  });
-  map.getLayers().insertAt(1, state.rasterLayer);
-  map.getView().fit(extent, { padding: [30, 30, 30, 30], duration: 350 });
-}
-
-function clearGrid() {
-  stopRenderAnimation();
-  if (state.cesiumGrid) viewer.entities.remove(state.cesiumGrid);
-  state.cesiumGrid = null;
-  state.renderCanvas = null;
-  state.renderParticles = [];
-  if (state.rasterLayer) map.removeLayer(state.rasterLayer);
-  state.rasterLayer = null;
-  els.stats.innerHTML = "";
-  els.vmin.textContent = "-";
-  els.vmax.textContent = "-";
-}
-
-function renderModeLabel(mode) {
-  return {
-    heatmap: "填色图",
-    particles: "粒子流",
-    contour: "等值线",
-    points: "采样点图",
-  }[mode] || "填色图";
-}
-
-function renderCanvas(data, width, height, mode) {
-  const allowed = allowedRenderModes(data);
-  if (!allowed.has(mode)) mode = "heatmap";
-  if (mode === "particles") return particleCanvas(data, width, height);
-  if (mode === "contour") return contourCanvas(data, width, height);
-  if (mode === "points") return pointCanvas(data, width, height);
-  return gridCanvas(data, width, height);
-}
-
-function gridCanvas(data, width, height) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, width, height);
-  const min = data.stats.min;
-  const max = data.stats.max;
-  const image = ctx.createImageData(width, height);
-  const pixels = image.data;
-  for (let y = 0; y < height; y++) {
-    const ny = height <= 1 ? 0 : y / (height - 1);
-    for (let x = 0; x < width; x++) {
-      const nx = width <= 1 ? 0 : x / (width - 1);
-      const value = sampleInterpolatedGrid(data, nx, ny);
-      if (shouldSkipValue(data, value)) continue;
-      const rgb = colorRgb(normalizeValue(value, min, max));
-      const k = (y * width + x) * 4;
-      pixels[k] = rgb[0];
-      pixels[k + 1] = rgb[1];
-      pixels[k + 2] = rgb[2];
-      pixels[k + 3] = data.category === "vector" ? 205 : 190;
-    }
-  }
-  ctx.putImageData(image, 0, 0);
-  return canvas;
-}
-
-function pointCanvas(data, width, height) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, width, height);
-  const rows = data.values.length;
-  const cols = data.values[0]?.length || 0;
-  const min = data.stats.min;
-  const max = data.stats.max;
-  const skip = Math.max(1, Math.ceil(Math.max(rows, cols) / 46));
-  ctx.globalCompositeOperation = "source-over";
-  for (let i = 0; i < rows; i += skip) {
-    for (let j = 0; j < cols; j += skip) {
-      const value = data.values[i][j];
-      if (shouldSkipValue(data, value)) continue;
-      const t = normalizeValue(value, min, max);
-      const x = ((j + 0.5) / Math.max(1, cols)) * width;
-      const y = ((i + 0.5) / Math.max(1, rows)) * height;
-      const radius = 2.8 + t * 7.5;
-      ctx.beginPath();
-      ctx.fillStyle = colorAlpha(t, 0.72);
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,.38)";
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-    }
-  }
-  return canvas;
-}
-
-function contourCanvas(data, width, height) {
-  const canvas = gridCanvas(data, width, height);
-  const ctx = canvas.getContext("2d");
-  const rows = data.values.length;
-  const cols = data.values[0]?.length || 0;
-  const min = data.stats.min;
-  const max = data.stats.max;
-  const cw = width / Math.max(1, cols - 1);
-  const ch = height / Math.max(1, rows - 1);
-  ctx.globalCompositeOperation = "source-over";
-  ctx.lineWidth = 1.4;
-  ctx.shadowColor = "rgba(0,0,0,.55)";
-  ctx.shadowBlur = 2;
-  for (let k = 1; k <= 8; k++) {
-    const level = min + (max - min) * (k / 9);
-    ctx.strokeStyle = k % 2 ? "rgba(238,253,251,.72)" : "rgba(69,240,222,.78)";
-    for (let i = 0; i < rows - 1; i++) {
-      for (let j = 0; j < cols - 1; j++) {
-        const v00 = data.values[i][j];
-        const v10 = data.values[i][j + 1];
-        const v11 = data.values[i + 1]?.[j + 1];
-        const v01 = data.values[i + 1]?.[j];
-        if ([v00, v10, v11, v01].some((v) => shouldSkipValue(data, v))) continue;
-        const pts = marchingCell(v00, v10, v11, v01, level, j * cw, i * ch, cw, ch);
-        for (let p = 0; p < pts.length; p += 2) {
-          ctx.beginPath();
-          ctx.moveTo(pts[p].x, pts[p].y);
-          ctx.lineTo(pts[p + 1].x, pts[p + 1].y);
-          ctx.stroke();
-        }
+function contourCanvas(data,W,H){
+  const c=gridCanvas(data,W,H),ctx=c.getContext('2d');
+  const rows=data.values.length,cols=data.values[0]?.length||0;
+  const {min,max}=data.stats,cw=W/Math.max(1,cols-1),ch=H/Math.max(1,rows-1);
+  ctx.lineWidth=1.5;ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=2;
+  for(let k=1;k<=9;k++){
+    const level=min+(max-min)*(k/10);
+    ctx.strokeStyle=k%2?'rgba(238,253,251,.78)':'rgba(70,240,222,.85)';
+    for(let i=0;i<rows-1;i++) for(let j=0;j<cols-1;j++){
+      const v=[data.values[i][j],data.values[i][j+1],data.values[i+1]?.[j+1],data.values[i+1]?.[j]];
+      if(v.some(x=>isNull(x,data))) continue;
+      const pts=marchingCell(v[0],v[1],v[2],v[3],level,j*cw,i*ch,cw,ch);
+      for(let p=0;p<pts.length;p+=2){
+        ctx.beginPath();ctx.moveTo(pts[p].x,pts[p].y);ctx.lineTo(pts[p+1].x,pts[p+1].y);ctx.stroke();
       }
     }
   }
-  ctx.shadowBlur = 0;
-  return canvas;
+  ctx.shadowBlur=0;return c;
 }
 
-function particleCanvas(data, width, height) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  if (!data.u_grid || !data.v_grid) {
-    return gridCanvas(data, width, height);
+function marchingCell(v00,v10,v11,v01,level,x,y,w,h){
+  const ip=(a,b,ax,ay,bx,by)=>{const t=(level-a)/Math.max(1e-9,b-a);return{x:ax+(bx-ax)*t,y:ay+(by-ay)*t};};
+  const pts=[];
+  if((v00<level)!==(v10<level)) pts.push(ip(v00,v10,x,y,x+w,y));
+  if((v10<level)!==(v11<level)) pts.push(ip(v10,v11,x+w,y,x+w,y+h));
+  if((v11<level)!==(v01<level)) pts.push(ip(v11,v01,x+w,y+h,x,y+h));
+  if((v01<level)!==(v00<level)) pts.push(ip(v01,v00,x,y+h,x,y));
+  return pts.length===2?pts:pts.length===4?[pts[0],pts[1],pts[2],pts[3]]:[];
+}
+
+function createFallbackEarthTexture(){
+  const c=mkCanvas(2048,1024),ctx=c.getContext('2d');
+  const g=ctx.createLinearGradient(0,0,0,c.height);
+  g.addColorStop(0,'#08254f');g.addColorStop(.42,'#0b6f9f');g.addColorStop(.58,'#0b779a');g.addColorStop(1,'#061f48');
+  ctx.fillStyle=g;ctx.fillRect(0,0,c.width,c.height);
+
+  // Procedural ocean-only texture. Coarse land polygons look like giant wedges
+  // on the globe, so land/sea separation is handled by dataset masks instead.
+  const glow=ctx.createRadialGradient(c.width*.52,c.height*.47,80,c.width*.52,c.height*.47,c.width*.62);
+  glow.addColorStop(0,'rgba(116,230,230,.22)');
+  glow.addColorStop(.55,'rgba(31,158,201,.10)');
+  glow.addColorStop(1,'rgba(1,8,20,0)');
+  ctx.fillStyle=glow;ctx.fillRect(0,0,c.width,c.height);
+
+  ctx.strokeStyle='rgba(180,240,255,.13)';ctx.lineWidth=1;
+  for(let lon=-180;lon<=180;lon+=30){
+    const x=((lon+180)/360)*c.width;
+    ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,c.height);ctx.stroke();
   }
-  seedParticles(data, width, height);
-  drawParticles(data, canvas, true);
-  return canvas;
-}
-
-function seedParticles(data, width, height) {
-  const rows = data.values.length;
-  const cols = data.values[0]?.length || 0;
-  const count = Math.max(120, Math.min(520, Math.floor(rows * cols * 0.18)));
-  state.renderParticles = Array.from({ length: count }, () => randomParticle(data, width, height));
-}
-
-function randomParticle(data, width, height) {
-  for (let tries = 0; tries < 20; tries++) {
-    const x = Math.random() * width;
-    const y = Math.random() * height;
-    if (sampleVector(data, x / width, y / height)) {
-      return { x, y, life: 35 + Math.random() * 130, speed: 1.1 + Math.random() * 1.9 };
-    }
+  for(let lat=-60;lat<=60;lat+=30){
+    const y=((90-lat)/180)*c.height;
+    ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(c.width,y);ctx.stroke();
   }
-  return {
-    x: Math.random() * width,
-    y: Math.random() * height,
-    life: 35 + Math.random() * 130,
-    speed: 1.1 + Math.random() * 1.9,
-  };
-}
-
-function startParticleAnimation(data, canvas) {
-  const tick = () => {
-    drawParticles(data, canvas, false);
-    if (viewer?.scene) viewer.scene.requestRender();
-    state.renderAnim = requestAnimationFrame(tick);
-  };
-  state.renderAnim = requestAnimationFrame(tick);
-}
-
-function stopRenderAnimation() {
-  if (state.renderAnim) cancelAnimationFrame(state.renderAnim);
-  state.renderAnim = null;
-}
-
-function drawParticles(data, canvas, initial) {
-  const ctx = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
-  if (initial) {
-    ctx.clearRect(0, 0, width, height);
-    const base = gridCanvas(data, width, height);
-    ctx.globalAlpha = 0.34;
-    ctx.drawImage(base, 0, 0);
-    ctx.globalAlpha = 1;
-  } else {
-    ctx.fillStyle = "rgba(2, 8, 10, .085)";
-    ctx.fillRect(0, 0, width, height);
-  }
-  ctx.lineCap = "round";
-  ctx.lineWidth = 1.35;
-  const min = data.stats.min;
-  const max = data.stats.max;
-  for (const p of state.renderParticles) {
-    const beforeX = p.x;
-    const beforeY = p.y;
-    const flow = sampleVector(data, p.x / width, p.y / height);
-    if (!flow) {
-      Object.assign(p, randomParticle(data, width, height));
-      continue;
-    }
-    const scale = 9.5 / Math.max(0.08, max);
-    p.x += flow.u * scale * p.speed;
-    p.y -= flow.v * scale * p.speed;
-    p.life -= 1;
-    if (p.x < 0 || p.x > width || p.y < 0 || p.y > height || p.life <= 0) {
-      Object.assign(p, randomParticle(data, width, height));
-      continue;
-    }
-    const t = normalizeValue(flow.speed ?? min, min, max);
-    ctx.strokeStyle = colorAlpha(t, 0.55 + t * 0.35);
+  ctx.strokeStyle='rgba(130,220,235,.08)';ctx.lineWidth=3;
+  for(let i=0;i<7;i++){
+    const y=c.height*(0.18+i*0.11);
     ctx.beginPath();
-    ctx.moveTo(beforeX, beforeY);
-    ctx.lineTo(p.x, p.y);
+    for(let x=0;x<=c.width;x+=16){
+      const yy=y+Math.sin((x/c.width)*Math.PI*4+i*.8)*18;
+      x?ctx.lineTo(x,yy):ctx.moveTo(x,yy);
+    }
     ctx.stroke();
   }
+  return c.toDataURL('image/png');
 }
 
-function sampleVector(data, nx, ny) {
-  if (!data.u_grid || !data.v_grid) return null;
-  const u = sampleGridValue(data.u_grid, nx, ny);
-  const v = sampleGridValue(data.v_grid, nx, ny);
-  const speed = sampleGrid(data, nx, ny);
-  if (u === null || v === null || speed === null) return null;
-  return { u, v, speed };
-}
+// ── WINDY PARTICLE SYSTEM ─────────────────────────────────────────────────────
+const PARTICLE_COUNT=2400,FADE_FRAMES=18;
+let _particles=[],_animId=null,_viewer=null,_olMap=null,_pCanvas=null,_pData=null;
 
-function sampleGrid(data, nx, ny) {
-  return sampleGridValue(data.values, nx, ny);
+function particleAlpha(age,maxAge,speedT){
+  return Math.min(age/FADE_FRAMES,(maxAge-age)/FADE_FRAMES,1)*(0.55+speedT*0.40);
 }
-
-function sampleGridValue(values, nx, ny) {
-  const rows = values.length;
-  const cols = values[0]?.length || 0;
-  if (!rows || !cols) return null;
-  const x = Math.max(0, Math.min(cols - 1, nx * (cols - 1)));
-  const y = Math.max(0, Math.min(rows - 1, ny * (rows - 1)));
-  const i = Math.floor(y);
-  const j = Math.floor(x);
-  return values[i]?.[j] ?? null;
-}
-
-function sampleInterpolatedGrid(data, nx, ny) {
-  const values = data.values;
-  const rows = values.length;
-  const cols = values[0]?.length || 0;
-  if (!rows || !cols) return null;
-  const x = Math.max(0, Math.min(cols - 1, nx * (cols - 1)));
-  const y = Math.max(0, Math.min(rows - 1, ny * (rows - 1)));
-  const j0 = Math.floor(x);
-  const i0 = Math.floor(y);
-  const j1 = Math.min(cols - 1, j0 + 1);
-  const i1 = Math.min(rows - 1, i0 + 1);
-  const v00 = values[i0]?.[j0];
-  const v10 = values[i0]?.[j1];
-  const v01 = values[i1]?.[j0];
-  const v11 = values[i1]?.[j1];
-  if ([v00, v10, v01, v11].some((v) => shouldSkipValue(data, v))) return null;
-  const fx = x - j0;
-  const fy = y - i0;
-  const top = v00 + (v10 - v00) * fx;
-  const bottom = v01 + (v11 - v01) * fx;
-  return top + (bottom - top) * fy;
-}
-
-function marchingCell(v00, v10, v11, v01, level, x, y, w, h) {
-  if ([v00, v10, v11, v01].some((v) => v === null || Number.isNaN(v))) return [];
-  const pts = [];
-  function interp(a, b, ax, ay, bx, by) {
-    const t = (level - a) / Math.max(1e-9, b - a);
-    return { x: ax + (bx - ax) * t, y: ay + (by - ay) * t };
+function resetParticle(p,data){
+  const b=data.bounds;
+  for(let t=0;t<30;t++){
+    p.lon=b.west+Math.random()*(b.east-b.west);
+    p.lat=b.south+Math.random()*(b.north-b.south);
+    if(sampleVec(data,p.lon,p.lat)) break;
   }
-  if ((v00 < level) !== (v10 < level)) pts.push(interp(v00, v10, x, y, x + w, y));
-  if ((v10 < level) !== (v11 < level)) pts.push(interp(v10, v11, x + w, y, x + w, y + h));
-  if ((v11 < level) !== (v01 < level)) pts.push(interp(v11, v01, x + w, y + h, x, y + h));
-  if ((v01 < level) !== (v00 < level)) pts.push(interp(v01, v00, x, y + h, x, y));
-  return pts.length === 2 ? pts : pts.length === 4 ? [pts[0], pts[1], pts[2], pts[3]] : [];
+  p.age=0;p.maxAge=160+Math.floor(Math.random()*280);p.speed=0.7+Math.random()*1.4;
+}
+function sampleVec(data,lon,lat){
+  if(!data.u_grid||!data.v_grid) return null;
+  const b=data.bounds;
+  const nx=(lon-b.west)/Math.max(1e-9,b.east-b.west);
+  const ny=1-(lat-b.south)/Math.max(1e-9,b.north-b.south);
+  if(isHiresLand(data,nx,ny)) return null;
+  const u=sampleGridNN(data.u_grid,nx,ny),v=sampleGridNN(data.v_grid,nx,ny);
+  if(u===null||v===null) return null;
+  return{u,v,speed:Math.sqrt(u*u+v*v)};
+}
+function geoToScreen(lon,lat){
+  if(!_viewer||!_pCanvas) return null;
+  try{
+    const pos=Cesium.Cartesian3.fromDegrees(lon,lat,0);
+    const toWindow=Cesium.SceneTransforms.wgs84ToWindowCoordinates||Cesium.SceneTransforms.worldToWindowCoordinates;
+    const sp=toWindow?toWindow(_viewer.scene,pos):null;
+    if(!sp) return null;
+    const rect=_pCanvas.getBoundingClientRect();
+    return{x:sp.x-rect.left,y:sp.y-rect.top};
+  }catch{return null;}
+}
+function startParticleAnimation(data){
+  stopParticleAnimation();
+  if(!data.u_grid||!data.v_grid) return;
+  _pData=data;
+  _particles=Array.from({length:PARTICLE_COUNT},()=>{
+    const p={lon:0,lat:0,age:0,maxAge:200,speed:1};
+    resetParticle(p,data);p.age=Math.floor(Math.random()*p.maxAge);return p;
+  });
+  const canvas=_pCanvas;if(!canvas) return;
+  const sizeCanvas=()=>{
+    const r=canvas.parentElement?.getBoundingClientRect();
+    if(r&&(canvas.width!==Math.round(r.width)||canvas.height!==Math.round(r.height))){
+      canvas.width=Math.round(r.width);canvas.height=Math.round(r.height);
+    }
+  };
+  const ctx=canvas.getContext('2d');
+  sizeCanvas();ctx.clearRect(0,0,canvas.width,canvas.height);
+  const ws=WINDY_SCALES.wind,sm=Math.max(0.01,data.stats.max);
+  const b=data.bounds;
+  const tick=()=>{
+    sizeCanvas();
+    ctx.globalCompositeOperation='destination-in';
+    ctx.fillStyle='rgba(255,255,255,0.90)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.globalCompositeOperation='source-over';
+    for(const p of _particles){
+      const vel=sampleVec(data,p.lon,p.lat);
+      if(!vel){resetParticle(p,data);continue;}
+      const prevSc=geoToScreen(p.lon,p.lat);
+      p.lon+=vel.u*0.0018*p.speed;p.lat+=vel.v*0.0018*p.speed;p.age++;
+      const nextSc=geoToScreen(p.lon,p.lat);
+      if(p.age>p.maxAge||p.lon<b.west||p.lon>b.east||p.lat<b.south||p.lat>b.north
+         ||!prevSc||!nextSc||Math.hypot(nextSc.x-prevSc.x,nextSc.y-prevSc.y)>60){
+        resetParticle(p,data);continue;
+      }
+      const t=Math.min(1,vel.speed/sm);
+      const alpha=particleAlpha(p.age,p.maxAge,t);
+      const [r,g,bv]=sampleScale(ws,t);
+      ctx.strokeStyle=`rgba(${r},${g},${bv},${alpha})`;
+      ctx.lineWidth=1.0+t*1.6;ctx.lineCap='round';
+      ctx.beginPath();ctx.moveTo(prevSc.x,prevSc.y);ctx.lineTo(nextSc.x,nextSc.y);ctx.stroke();
+    }
+    _animId=requestAnimationFrame(tick);
+  };
+  _animId=requestAnimationFrame(tick);
+}
+function stopParticleAnimation(){
+  if(_animId){cancelAnimationFrame(_animId);_animId=null;}
+  if(_pCanvas){const ctx=_pCanvas.getContext('2d');ctx.clearRect(0,0,_pCanvas.width,_pCanvas.height);}
 }
 
-function normalizeValue(value, min, max) {
-  return Math.max(0, Math.min(1, (value - min) / Math.max(1e-9, max - min)));
-}
+// ── DOMAIN / UI CONFIG ────────────────────────────────────────────────────────
+const DOMAINS=[
+  {id:'auto',      label:'自动',icon:'🔮',title:'根据问题自动判断',
+   suggestions:['请评估当前框选区域的综合海洋环境','该海域近期有哪些主要风险？']},
+  {id:'marine',    label:'海洋',icon:'🌊',title:'海表温度、盐度、叶绿素等',
+   suggestions:['台湾海峡海表温度异常如何？','这片海域叶绿素浓度偏高吗？','目前海表盐度是否正常？']},
+  {id:'stargazing',label:'观星',icon:'🌟',title:'月相、光污染、云量',
+   suggestions:['今晚台湾东部适合观星吗？','这片海域光污染程度如何？','当前月相是否影响观星？']},
+  {id:'biology',   label:'生物',icon:'🐠',title:'珊瑚白化、赤潮、栖息地',
+   suggestions:['这片海域有珊瑚白化风险吗？','目前是否有赤潮风险？','这片海域适合哪些鱼类栖息？']},
+  {id:'navigation',label:'航行',icon:'⚓',title:'浪高、风级、航行安全',
+   suggestions:['台湾海峡适合小型渔船出海吗？','当前海况对集装箱船只安全吗？','近期浪高风级评估如何？']},
+];
+const DOMAIN_MAP=Object.fromEntries(DOMAINS.map(d=>[d.id,d]));
+const RENDER_MODES=[
+  {id:'heatmap',  label:'填色',  title:'Windy 风格连续色带填色'},
+  {id:'particles',label:'粒子',  title:'Windy 风格动态粒子流（需矢量场 u/v）'},
+  {id:'contour',  label:'等值线',title:'等值线叠加'},
+  {id:'points',   label:'点图',  title:'采样点符号图'},
+];
+const PIPELINE_LABELS={intent:'意图',retrieval:'检索',context:'数据',reasoning:'推理',report:'报告'};
 
-function shouldSkipValue(data, value) {
-  if (value === null || Number.isNaN(value)) return true;
-  return data?.land_mask === "positive" && value > 0;
-}
+// ── VUE 3 APP ─────────────────────────────────────────────────────────────────
+const{createApp}=Vue;
+createApp({
+  data(){return{
+    healthText:'服务状态检查中…',
+    variableList:[],selectedVar:'',
+    renderMode:'heatmap',stepVal:0,maxPoints:9000,
+    selectMode:false,selection:{west:119,east:122,south:23,north:26},
+    gridData:null,cesiumEntity:null,selectionEntity:null,olLayer:null,
+    stats:null,vmin:'-',vmax:'-',legendCssStr:'',
+    layerOpacity:0.82,queryLoading:false,
+    oceanStatus:'地球可旋转浏览；开启框选后在地球上拖拽选择区域。',
+    apiStatus:'接口：等待请求。',
+    chatOpen:false,reportVisible:false,reportHtml:'',
+    reportMeta:'等待生成。',reportStatus:'等待提问。',
+    messages:[{role:'ai',text:'可以询问海洋热浪、酸化、渔业风险，框选区域后 AI 会自动获取数据。'}],
+    domain:'auto',question:'请结合海表温度和海洋热浪知识，评估目标海域对珊瑚礁和渔业的风险，并形成规划建议',
+    backend:'auto',topk:6,streaming:false,streamEs:null,
+    agentTrace:[],agentSummary:null,agentSummaryHtml:'',evidence:[],
+    geoApiReady:false,
+    pipelineSteps:{intent:'',retrieval:'',context:'',reasoning:'',report:''},
+  };},
 
-function colorAlpha(t, alpha) {
-  const rgb = colorRgb(t);
-  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
-}
+  computed:{
+    domains(){return DOMAINS;},renderModes(){return RENDER_MODES;},
+    pipelineLabels(){return PIPELINE_LABELS;},
+    suggestions(){return DOMAIN_MAP[this.domain]?.suggestions||[];},
+    currentMeta(){return this.variableList.find(v=>v.key===this.selectedVar)?.meta||null;},
+    allowedModes(){return new Set(this.currentMeta?.render_modes||['heatmap','contour','points']);},
+    legendStyle(){return{background:this.legendCssStr};},
+  },
 
-function color(t) {
-  const rgb = colorRgb(t);
-  return `rgb(${rgb.join(",")})`;
-}
+  watch:{renderMode(){if(this.gridData) this.applyRender(this.gridData).catch(()=>{});}},
 
-function colorRgb(t) {
-  const stops = [[29,78,216],[8,145,178],[34,197,94],[253,224,71],[220,38,38]];
-  return interpolateStops(t, stops);
-}
+  mounted(){
+    _pCanvas=this.$refs.particleCanvas;
+    this.checkHealth();this.checkGeoApi();this.loadDatasets();
+    this.$nextTick(()=>requestAnimationFrame(()=>{this.initCesium();this.initMap();this._drawSelectionRect(this.selection);this.resizeAll();}));
+    window.addEventListener('resize',()=>{
+      if(_pCanvas){_pCanvas.width=0;_pCanvas.height=0;}
+      this.resizeAll();
+    });
+  },
 
-function interpolateStops(t, stops) {
-  t = Math.max(0, Math.min(1, t));
-  const p = t * (stops.length - 1);
-  const i = Math.min(stops.length - 2, Math.floor(p));
-  const f = p - i;
-  const a = stops[i];
-  const b = stops[i + 1];
-  return a.map((v, k) => Math.round(v + (b[k] - v) * f));
-}
+  methods:{
+    // ── Cesium ──
+    initCesium(){
+      _viewer=new Cesium.Viewer('earth',{
+        baseLayer:false,baseLayerPicker:false,geocoder:false,homeButton:false,
+        sceneModePicker:false,navigationHelpButton:false,
+        animation:false,timeline:false,fullscreenButton:false,
+        infoBox:false,selectionIndicator:false,
+        terrainProvider:new Cesium.EllipsoidTerrainProvider(),
+        requestRenderMode:false,targetFrameRate:60,
+      });
+      _viewer.imageryLayers.removeAll();
+      _viewer.imageryLayers.addImageryProvider(
+        new Cesium.SingleTileImageryProvider({url:LOCAL_EARTH_TEXTURE_URL,rectangle:Cesium.Rectangle.MAX_VALUE}));
+      _viewer.scene.globe.enableLighting=true;
+      _viewer.scene.globe.showGroundAtmosphere=true;
+      _viewer.scene.skyAtmosphere.show=true;
+      _viewer.scene.screenSpaceCameraController.enableTilt=true;
+      _viewer.scene.skyBox.show=false;_viewer.scene.sun.show=false;_viewer.scene.moon.show=false;
+      _viewer.scene.backgroundColor=Cesium.Color.fromCssColorString('#020409');
+      _viewer.camera.setView({destination:Cesium.Cartesian3.fromDegrees(121,23,16000000)});
+      this.resizeAll();
+      const h=new Cesium.ScreenSpaceEventHandler(_viewer.canvas);
+      let anc=null;
+      h.setInputAction(e=>{if(!this.selectMode)return;const g=this._pickGlobe(e.position);if(g)anc=g;},Cesium.ScreenSpaceEventType.LEFT_DOWN);
+      h.setInputAction(e=>{if(!this.selectMode||!anc)return;const g=this._pickGlobe(e.endPosition);if(g)this.setSelection(anc,g);},Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+      h.setInputAction(()=>{anc=null;},Cesium.ScreenSpaceEventType.LEFT_UP);
+    },
+    _pickGlobe(pos){
+      const ray=_viewer.camera.getPickRay(pos);
+      const hit=_viewer.scene.globe.pick(ray,_viewer.scene);
+      if(!hit)return null;
+      const c=Cesium.Ellipsoid.WGS84.cartesianToCartographic(hit);
+      return{lon:Cesium.Math.toDegrees(c.longitude),lat:Cesium.Math.toDegrees(c.latitude)};
+    },
+    resizeAll(){requestAnimationFrame(()=>{if(_viewer){_viewer.resize();_viewer.scene.requestRender();}if(_olMap)_olMap.updateSize();});},
 
+    // ── OpenLayers ──
+    initMap(){
+      _olMap=new ol.Map({
+        target:'map',
+        layers:[new ol.layer.Tile({source:new ol.source.OSM()})],
+        view:new ol.View({center:ol.proj.fromLonLat([121,24]),zoom:7}),
+        controls:ol.control.defaults.defaults({zoom:false}),
+      });
+    },
+
+    // ── Health ──
+    async checkHealth(){
+      try{const d=await fetch('/api/health').then(r=>r.json());
+        this.healthText=`Demo=${d.status} | LLM=${d.llm?.configured?d.llm.model:'本地回退'}`;}
+      catch{this.healthText='服务检查失败';}
+    },
+    async checkGeoApi(){
+      try{const d=await fetch('/geo-api/api/health').then(r=>r.json());this.geoApiReady=d.status==='ok';}
+      catch{this.geoApiReady=false;}
+    },
+
+    // ── Datasets ──
+    async loadDatasets(){
+      try{
+        const d=await fetch('/api/ocean/datasets').then(r=>r.json());
+        const list=[];
+        for(const ds of(d.datasets||[])) for(const v of(ds.variables||[]))
+          list.push({key:`${ds.id}::${v.name}`,label:`${ds.id} / ${v.name} — ${v.long_name||''} (${v.units||''})`,meta:v});
+        this.variableList=list;
+        const preferred=list.find(v=>v.key==='sst_oisst_taiwan_small::sst')
+          ||list.find(v=>/_taiwan_small::/.test(v.key))
+          ||list.find(v=>!v.key.startsWith('noaa_'))
+          ||list[0];
+        if(preferred)this.selectedVar=preferred.key;
+      }catch(e){this.apiStatus=`数据集加载失败：${e.message}`;}
+    },
+    async syncData(){
+      this.apiStatus='同步中…';
+      try{await fetch('/api/sync',{method:'POST'});await this.loadDatasets();this.apiStatus='同步完成。';}
+      catch(e){this.apiStatus=`同步失败：${e.message}`;}
+    },
+
+    // ── Selection ──
+    toggleSelect(){
+      this.selectMode=!this.selectMode;
+      if(_viewer)_viewer.scene.screenSpaceCameraController.enableRotate=!this.selectMode;
+      this.oceanStatus=this.selectMode?'框选模式：在地球上拖拽选择海域。':'地球可旋转浏览。';
+    },
+    setSelection(a,b){
+      this.selection={west:Math.min(a.lon,b.lon),east:Math.max(a.lon,b.lon),south:Math.min(a.lat,b.lat),north:Math.max(a.lat,b.lat)};
+      const s=this.selection;
+      this.oceanStatus=`已框选：${s.west.toFixed(1)}°–${s.east.toFixed(1)}°E，${s.south.toFixed(1)}°–${s.north.toFixed(1)}°N`;
+      this._drawSelectionRect(s);
+    },
+    _drawSelectionRect(s){
+      if(!_viewer)return;
+      if(this.selectionEntity)_viewer.entities.remove(this.selectionEntity);
+      this.selectionEntity=_viewer.entities.add({rectangle:{
+        coordinates:Cesium.Rectangle.fromDegrees(s.west,s.south,s.east,s.north),
+        fill:false,outline:true,
+        outlineColor:Cesium.Color.fromCssColorString('#f5c84d'),
+        outlineWidth:2,height:0,
+      }});
+    },
+
+    // ── Render mode ──
+    setRenderMode(mode){if(this.allowedModes.has(mode))this.renderMode=mode;},
+
+    // ── Query ──
+    async queryOcean(){
+      if(!this.selectedVar){this.oceanStatus='请先选择数据集/变量。';return;}
+      if(!this.selection){this.oceanStatus='请先框选海域。';return;}
+      const [dataset,variable]=this.selectedVar.split('::');
+      this.oceanStatus='查询海洋要素中…';this.apiStatus='POST /api/ocean/query…';this.queryLoading=true;
+      try{
+        const t0=Date.now();
+        const res=await fetch('/api/ocean/query',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({dataset,variable,bounds:this.selection,max_points:this.maxPoints,step:this.stepVal||0}),
+        });
+        if(!res.ok){const e=await res.json();throw new Error(e.message||e.error||res.statusText);}
+        const data=await res.json();
+        this.gridData=data;await this.applyRender(data);
+        const lm=data.land_mask_hires
+          ? '像素掩膜=✓'
+          : (data.land_mask_applied>0 ? '格点掩膜=✓ 像素掩膜=后端未返回' : '掩膜=未启用');
+        this.apiStatus=`${dataset}/${variable} ✓  ${data.stats.count}格点  ${lm}  ${Date.now()-t0}ms`;
+      }catch(e){
+        this.oceanStatus=`查询失败：${e.message}`;this.apiStatus=`错误：${e.message}`;
+      }finally{this.queryLoading=false;}
+    },
+    async loadDemoVector(){
+      const demo=this.variableList.find(v=>/hycom|uv|water_u|uwnd/.test(v.key.toLowerCase()));
+      if(demo){
+        this.selectedVar=demo.key;this.renderMode='particles';
+        this.selection={west:118,east:126,south:18,north:26};
+        this._drawSelectionRect(this.selection);
+        await this.queryOcean();
+      }else{this.oceanStatus='未找到矢量场数据（HYCOM u/v）。';}
+    },
+
+    // ── Apply render ──
+    async applyRender(data){
+      stopParticleAnimation();
+      const mode=this.allowedModes.has(this.renderMode)?this.renderMode:'heatmap';
+      this.stats=data.stats;
+      this.vmin=`${+data.stats.min.toFixed(4)} ${data.units||''}`;
+      this.vmax=`${+data.stats.max.toFixed(4)} ${data.units||''}`;
+      this.legendCssStr=legendCss(data);
+      this.oceanStatus=`已渲染 ${data.dataset} / ${data.long_name}  (格点掩膜=${data.land_mask_applied||0})`;
+      const W=1024,H=512;
+      if(mode==='particles'){
+        if(!data.u_grid||!data.v_grid){
+          this.oceanStatus='该变量无 u/v 矢量场，粒子流不可用。请选 HYCOM 海流数据或点击「海流样例」。';
+          const c=gridCanvas(data,W,H);
+          applyBackendHiresMaskToCanvas(c,data);
+          await applyOptionalVectorLandMask(c,data);
+          this.updateCesiumRaster(data,c);this.updateOlRaster(data,c);return;
+        }
+        // Dim background for Cesium (particles prominent) — use 28% alpha directly
+        const bgCesium=gridCanvas(data,W,H,0.28);
+        applyBackendHiresMaskToCanvas(bgCesium,data);
+        await applyOptionalVectorLandMask(bgCesium,data);
+        this.updateCesiumRaster(data,bgCesium);
+        // OL map shows full heatmap with land mask
+        const olHeatmap=gridCanvas(data,W,H);
+        applyBackendHiresMaskToCanvas(olHeatmap,data);
+        await applyOptionalVectorLandMask(olHeatmap,data);
+        this.updateOlRaster(data,olHeatmap);
+        startParticleAnimation(data);
+      }else{
+        let c;
+        if(mode==='contour') c=contourCanvas(data,W,H);
+        else if(mode==='points') c=pointCanvas(data,W,H);
+        else c=gridCanvas(data,W,H);
+        applyBackendHiresMaskToCanvas(c,data);
+        await applyOptionalVectorLandMask(c,data);
+        this.updateCesiumRaster(data,c);this.updateOlRaster(data,c);
+      }
+    },
+    updateCesiumRaster(data,canvas){
+      this.resizeAll();
+      if(this.cesiumEntity)_viewer.entities.remove(this.cesiumEntity);
+      const b=data.bounds;
+      const rect=Cesium.Rectangle.fromDegrees(b.west,b.south,b.east,b.north);
+      this.cesiumEntity=_viewer.entities.add({rectangle:{
+        coordinates:rect,
+        material:new Cesium.ImageMaterialProperty({image:canvas,transparent:true}),
+      }});
+      _viewer.scene.requestRender();
+    },
+    updateOlRaster(data,canvas){
+      if(this.olLayer)_olMap.removeLayer(this.olLayer);
+      const b=data.bounds;
+      const ext=ol.proj.transformExtent([b.west,b.south,b.east,b.north],'EPSG:4326','EPSG:3857');
+      this.olLayer=new ol.layer.Image({
+        source:new ol.source.ImageStatic({url:canvas.toDataURL('image/png'),imageExtent:ext,projection:'EPSG:3857'}),
+        opacity:this.layerOpacity,
+      });
+      _olMap.getLayers().insertAt(1,this.olLayer);
+      _olMap.getView().fit(ext,{padding:[20,20,20,20],duration:300});
+    },
+    updateLayerOpacity(){if(this.olLayer)this.olLayer.setOpacity(this.layerOpacity);},
+    clearGrid(){
+      stopParticleAnimation();
+      if(this.cesiumEntity)_viewer.entities.remove(this.cesiumEntity);
+      if(this.selectionEntity)_viewer.entities.remove(this.selectionEntity);
+      this.cesiumEntity=null;this.selectionEntity=null;
+      if(this.olLayer)_olMap.removeLayer(this.olLayer);
+      this.olLayer=null;this.gridData=null;this.stats=null;this.selection=null;
+      this.vmin='-';this.vmax='-';this.legendCssStr='';this.oceanStatus='已清除。';
+    },
+
+    // ── Chat / SSE ──
+    async sendQuery(){
+      const q=this.question.trim();if(!q||this.streaming)return;
+      this.messages.push({role:'user',text:q});
+      this.streaming=true;this.reportStatus='分析中…';
+      this.agentTrace=[];this.evidence=[];
+      Object.keys(this.pipelineSteps).forEach(k=>{this.pipelineSteps[k]='';});
+      if(this.geoApiReady) await this._geoStream(q);
+      else                 await this._legacyAsk(q);
+    },
+    async _geoStream(q){
+      const bbox=this.selection||{west:119,east:122,south:23,north:26};
+      const params=new URLSearchParams({question:q,domain:this.domain,bbox:JSON.stringify(bbox)});
+      if(this.streamEs)this.streamEs.close();
+      const es=new EventSource(`/geo-api/api/geo/stream?${params}`);
+      this.streamEs=es;
+      let buf='';
+      const msgIdx=this.messages.length;
+      this.messages.push({role:'ai',html:'<span class="cursor">▋</span>'});
+      const upd=()=>{this.messages.splice(msgIdx,1,{role:'ai',html:this._md(buf)+'<span class="cursor">▋</span>'});this._scrollChat();};
+      es.onmessage=(e)=>{
+        let msg;try{msg=JSON.parse(e.data);}catch{return;}
+        const{type,data:d,content:c}=msg;
+        if(type==='domain'){this.pipelineSteps.intent='active';}
+        else if(type==='intent'){this.pipelineSteps.intent='done';this.pipelineSteps.retrieval='active';this.pipelineSteps.context='active';}
+        else if(type==='context'){this.pipelineSteps.context='done';this.pipelineSteps.retrieval='done';this.pipelineSteps.reasoning='active';}
+        else if(type==='analysis'){
+          this.pipelineSteps.reasoning='done';this.pipelineSteps.report='active';
+          const p=d||c||{};
+          const kept=p.kept_docs||p.kept_documents||[];
+          const passed=p.passed_docs||p.passed_documents||[];
+          this.evidence=[
+            ...kept.map(x=>({verdict:'keep',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3)})),
+            ...passed.map(x=>({verdict:'pass',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3)})),
+          ];
+        }
+        else if(type==='token'){buf+=(d||c||'');upd();}
+        else if(type==='done'){
+          this.pipelineSteps.report='done';
+          if(msg.trace&&Array.isArray(msg.trace))this.agentTrace=msg.trace;
+          const fh=this._md(buf);
+          this.messages.splice(msgIdx,1,{role:'ai',html:fh});
+          this.reportHtml=fh;
+          this.reportMeta=`领域：${msg.domain||this.domain} · 修订：${msg.revisions||0} · ${((msg.elapsed_ms||0)/1000).toFixed(1)}s`;
+          buf='';this.streaming=false;this.reportStatus='分析完成。';es.close();this._scrollChat();
+        }
+        else if(type==='error'){
+          this.messages.push({role:'ai',text:`❌ ${msg.message||c||'出错'}`});
+          this.streaming=false;this.reportStatus='出错。';es.close();
+        }
+      };
+      es.onerror=()=>{
+        this.messages.push({role:'ai',text:'❌ geo-api 连接失败，请确认服务已启动（port 5001）。'});
+        this.streaming=false;this.reportStatus='连接失败。';es.close();
+      };
+    },
+    async _legacyAsk(q){
+      try{
+        const res=await fetch('/api/agents/report',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({question:q,top_k:this.topk,backend:this.backend,region:this.selection}),
+        });
+        const data=await res.json();
+        const html=data.report?this._md(data.report):`<em>${data.error||'无报告'}</em>`;
+        this.messages.push({role:'ai',html});this.reportHtml=html;
+      }catch(e){this.messages.push({role:'ai',text:`❌ ${e.message}`});}
+      finally{this.streaming=false;this.reportStatus='分析完成。';this._scrollChat();}
+    },
+    clearChat(){
+      if(this.streamEs){this.streamEs.close();this.streamEs=null;}
+      this.streaming=false;
+      this.messages=[{role:'ai',text:'对话已清空。'}];
+      this.reportHtml='';this.agentTrace=[];this.evidence=[];
+      this.agentSummary=null;this.agentSummaryHtml='';
+      Object.keys(this.pipelineSteps).forEach(k=>{this.pipelineSteps[k]='';});
+    },
+    _scrollChat(){this.$nextTick(()=>{const el=this.$refs.chatMessages;if(el)el.scrollTop=el.scrollHeight;});},
+
+    // ── Helpers ──
+    escapeHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');},
+    renderSuggestions(){},
+    _md(text){
+      if(!text)return'';
+      let h=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      h=h.replace(/^### (.+)$/gm,'<h4>$1</h4>');
+      h=h.replace(/^## (.+)$/gm,'<h3>$1</h3>');
+      h=h.replace(/^# (.+)$/gm,'<h2>$1</h2>');
+      h=h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+      h=h.replace(/\*(.+?)\*/g,'<em>$1</em>');
+      h=h.replace(/`([^`]+)`/g,'<code>$1</code>');
+      h=h.replace(/^[*\-] (.+)$/gm,'<li>$1</li>');
+      h=h.replace(/(<li>[\s\S]*?<\/li>\n?)+/g,s=>`<ul>${s}</ul>`);
+      h=h.replace(/^\d+\. (.+)$/gm,'<li>$1</li>');
+      h=h.replace(/^---+$/gm,'<hr>');
+      h=h.replace(/\n/g,'<br>');
+      return h;
+    },
+  },
+}).mount('#app');
+
+// ── TOPOJSON PIXEL-LEVEL LAND MASK ───────────────────────────────────────────
+// Uses Natural Earth 110m coastlines via world-atlas CDN.
+// Completely independent of ETOPO — works for any query bbox worldwide.
 // ─────────────────────────────────────────────────────────────────────────────
-// Utilities
-// ─────────────────────────────────────────────────────────────────────────────
-function appendMessage(role, text) {
-  const div = document.createElement("div");
-  div.className = `message ${role}`;
-  div.textContent = text;
-  els.chatMessages.appendChild(div);
-  els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
-  return div;
+
+let _landGeoFeatures = null;   // cached parsed fallback GeoJSON features
+const _landGeoBboxCache = new Map(); // bbox key -> GeoServer WFS features
+const _landMaskCache = new Map(); // "w,e,s,n" → ImageData (reused per bbox)
+
+async function fetchLandGeoJson(url) {
+  const res = await fetch(url, {headers:{Accept:'application/json'}});
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const geo = await res.json();
+  if (geo?.type === 'FeatureCollection' && Array.isArray(geo.features)) return geo.features;
+  if (geo?.type === 'Feature') return [geo];
+  throw new Error('invalid GeoJSON response');
 }
 
-async function fetchJson(url, options) {
-  const res = await fetch(url, options);
-  const contentType = res.headers.get("content-type") || "";
-  const raw = await res.text();
-  let data;
-  if (contentType.includes("application/json")) {
-    try { data = raw ? JSON.parse(raw) : {}; }
-    catch (error) { throw new Error(`接口返回 JSON 解析失败：${error.message}`); }
-  } else {
-    const preview = raw.replace(/\s+/g, " ").replace(/<[^>]+>/g, " ").trim().slice(0, 220);
-    throw new Error(`接口返回非 JSON（HTTP ${res.status}）：${preview || res.statusText}`);
+/** Prefer local GeoServer Natural Earth polygons; fall back to CDN TopoJSON. */
+async function loadLandGeo(bounds) {
+  if (bounds) {
+    const west = Math.min(bounds.west, bounds.east);
+    const east = Math.max(bounds.west, bounds.east);
+    const south = Math.min(bounds.south, bounds.north);
+    const north = Math.max(bounds.south, bounds.north);
+    const key = `${west.toFixed(3)},${east.toFixed(3)},${south.toFixed(3)},${north.toFixed(3)}`;
+    if (_landGeoBboxCache.has(key)) return _landGeoBboxCache.get(key);
+    const params = new URLSearchParams({
+      service:'WFS',
+      version:'1.0.0',
+      request:'GetFeature',
+      typeName:GEOSERVER_LAND_LAYER,
+      outputFormat:'application/json',
+      srsName:'EPSG:4326',
+      bbox:`${west},${south},${east},${north},EPSG:4326`,
+    });
+    try {
+      const features = await fetchLandGeoJson(`${GEOSERVER_WFS_URL}?${params}`);
+      _landGeoBboxCache.set(key, features);
+      return features;
+    } catch (e) {
+      console.warn('[LandMask] GeoServer WFS load failed:', e.message, 'using fallback');
+    }
   }
-  if (!res.ok) throw new Error(data.message || data.error || res.statusText);
-  return data;
+
+  if (_landGeoFeatures) return _landGeoFeatures;
+  try {
+    if (typeof topojson === 'undefined') throw new Error('topojson-client unavailable');
+    const topo = await fetch(
+      'https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json'
+    ).then(r => r.json());
+    // topojson-client converts to GeoJSON
+    const geo = topojson.feature(topo, topo.objects.land);
+    _landGeoFeatures = geo.features?.length ? geo.features : [geo];
+    return _landGeoFeatures;
+  } catch (e) {
+    console.warn('[LandMask] TopoJSON load failed:', e.message, '— land masking disabled');
+    return null;
+  }
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+/**
+ * Build an ImageData bitmap where R=255 means land, R=0 means ocean.
+ * Resolution W×H, covering geographic bbox.
+ * Cached by bbox key.
+ */
+async function buildLandMaskBitmap(bounds, W = 512, H = 256) {
+  const { west, east, south, north } = bounds;
+  const key = `${west.toFixed(3)},${east.toFixed(3)},${south.toFixed(3)},${north.toFixed(3)}`;
+  if (_landMaskCache.has(key)) return _landMaskCache.get(key);
+
+  const features = await loadLandGeo(bounds);
+  if (!features) return null;
+
+  const canvas = mkCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; // land = white
+
+  const lonX = lon => ((lon - west) / (east - west)) * W;
+  const latY = lat => (1 - (lat - south) / (north - south)) * H; // canvas y flipped
+
+  ctx.beginPath();
+  for (const feat of features) {
+    const g = feat.geometry || feat;
+    const drawRing = ring => {
+      if (!ring.length) return;
+      ctx.moveTo(lonX(ring[0][0]), latY(ring[0][1]));
+      for (let i = 1; i < ring.length; i++) ctx.lineTo(lonX(ring[i][0]), latY(ring[i][1]));
+      ctx.closePath();
+    };
+    if (g.type === 'Polygon') {
+      for (const ring of g.coordinates) drawRing(ring);
+    } else if (g.type === 'MultiPolygon') {
+      for (const poly of g.coordinates) for (const ring of poly) drawRing(ring);
+    }
+  }
+  ctx.fill('evenodd'); // proper polygon winding rule
+
+  const imgData = ctx.getImageData(0, 0, W, H);
+  _landMaskCache.set(key, imgData);
+  return imgData;
 }
 
-function escapeAttr(value) { return escapeHtml(value); }
+function applyBackendHiresMaskToCanvas(canvas, data) {
+  const lm = data?.land_mask_hires;
+  if (!lm?.length) return;
+  const rows = lm.length, cols = lm[0]?.length || 0;
+  if (!rows || !cols) return;
+
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.getImageData(0, 0, W, H);
+  const px = imgData.data;
+
+  for (let y = 0; y < H; y++) {
+    const ny = H <= 1 ? 0 : y / (H - 1);
+    const li = Math.round(Math.max(0, Math.min(rows - 1, (1 - ny) * (rows - 1))));
+    const row = lm[li];
+    for (let x = 0; x < W; x++) {
+      const nx = W <= 1 ? 0 : x / (W - 1);
+      const lj = Math.round(Math.max(0, Math.min(cols - 1, nx * (cols - 1))));
+      if (row?.[lj] === true) px[(y * W + x) * 4 + 3] = 0;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+async function applyOptionalVectorLandMask(canvas, data) {
+  if (data?.land_mask_hires?.length) return;
+  await applyLandMaskToCanvas(canvas, data.bounds);
+}
+
+/**
+ * Post-process a heatmap/contour canvas: clear alpha for every land pixel.
+ * Uses the same W×H as the canvas for 1:1 pixel accuracy.
+ */
+async function applyLandMaskToCanvas(canvas, bounds) {
+  const W = canvas.width, H = canvas.height;
+  const lm = await buildLandMaskBitmap(bounds, W, H);
+  if (!lm) return; // no land data — skip gracefully
+
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.getImageData(0, 0, W, H);
+  const px = imgData.data, lpx = lm.data;
+
+  for (let i = 0; i < px.length; i += 4) {
+    if (lpx[i] > 128) px[i + 3] = 0; // white=land → transparent
+  }
+  ctx.putImageData(imgData, 0, 0);
+}

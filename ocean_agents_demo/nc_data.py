@@ -102,6 +102,9 @@ def list_variables() -> dict[str, Any]:
 
 
 def query_grid(payload: dict[str, Any]) -> dict[str, Any]:
+    import time as _time
+    _t0 = _time.monotonic()
+
     path = _dataset_path(str(payload.get("dataset") or ""), payload.get("path"))
     variable = str(payload.get("variable") or "sst")
     bounds = payload.get("bounds") or payload
@@ -113,7 +116,9 @@ def query_grid(payload: dict[str, Any]) -> dict[str, Any]:
     requested_step = max(0, min(1000, int(payload.get("step") or payload.get("stride") or 0)))
 
     try:
-        return _query_grid_netcdf4(path, variable, west, east, south, north, max_points, requested_step)
+        result = _query_grid_netcdf4(path, variable, west, east, south, north, max_points, requested_step)
+        result["render_time_ms"] = round((_time.monotonic() - _t0) * 1000, 1)
+        return result
     except ImportError:
         pass
     except Exception:
@@ -185,6 +190,9 @@ def query_grid(payload: dict[str, Any]) -> dict[str, Any]:
         "values": grid,
         "land_mask_applied": masked_count,
         "land_mask_source": str(LAND_MASK_NC) if masked_count else "",
+        "land_mask_hires": _compute_hires_land_mask(
+            path, min(west, east), max(west, east), min(south, north), max(south, north)
+        ),
         "step": stride,
         "requested_step": requested_step,
         "auto_step": auto_step,
@@ -618,14 +626,66 @@ def _apply_land_mask(
     lats: list[float],
     lons: list[float],
 ) -> tuple[list[list[float | None]], list[float], int]:
+    import logging as _log
+    _logger = _log.getLogger("ocean.nc_data.landmask")
+
     masked = 0
     flat: list[float] = []
     mask = _load_land_mask(current_path)
+    is_positive = render_meta.get("land_mask") == "positive"
+
+    # ── Fast path: numpy-vectorized ETOPO lookup ───────────────────────────
+    if mask and not is_positive:
+        try:
+            import numpy as np
+            m_lats = np.asarray(mask["lats"], dtype=np.float32)
+            m_lons = np.asarray(mask["lons"], dtype=np.float32)
+            m_vals = np.asarray(mask["values"], dtype=np.float32)  # (nlat, nlon)
+            q_lats = np.asarray(lats, dtype=np.float32)
+            q_lons = np.asarray(lons, dtype=np.float32)
+
+            lat_min, lat_max = float(m_lats.min()), float(m_lats.max())
+            lon_min, lon_max = float(m_lons.min()), float(m_lons.max())
+            in_range = (
+                (q_lats >= lat_min) & (q_lats <= lat_max)
+            )  # shape (nlat,)
+
+            # Nearest-index lookup for each query lat/lon
+            def _ni(arr, target):
+                idx = np.abs(arr - target).argmin()
+                return int(idx)
+
+            for i, (lat, row) in enumerate(zip(lats, grid)):
+                if not in_range[i]:
+                    # Outside ETOPO coverage — keep data, log once
+                    for j, value in enumerate(row):
+                        if value is not None:
+                            flat.append(float(value))
+                    continue
+                mi = _ni(m_lats, lat)
+                for j, (lon, value) in enumerate(zip(lons, row)):
+                    if value is None:
+                        continue
+                    if lon < lon_min or lon > lon_max:
+                        flat.append(float(value))
+                        continue
+                    mj = _ni(m_lons, lon)
+                    elev = float(m_vals[mi, mj])
+                    if math.isfinite(elev) and elev > 0:
+                        row[j] = None
+                        masked += 1
+                    else:
+                        flat.append(float(value))
+            return grid, flat, masked
+        except Exception as exc:
+            _logger.debug("numpy land-mask fast-path failed (%s), falling back", exc)
+
+    # ── Fallback: pure-Python cell-overlap approach ────────────────────────
     for i, row in enumerate(grid):
         for j, value in enumerate(row):
             if value is None:
                 continue
-            if render_meta.get("land_mask") == "positive" and value > 0:
+            if is_positive and value > 0:
                 row[j] = None
                 masked += 1
                 continue
@@ -637,36 +697,129 @@ def _apply_land_mask(
     return grid, flat, masked
 
 
-def _load_land_mask(current_path: Path) -> dict[str, Any] | None:
+def _load_land_mask(current_path: Path) -> dict[str, Any] | None:  # noqa: ARG001
+    import logging as _log
+    _logger = _log.getLogger("ocean.nc_data.landmask")
+
     if not LAND_MASK_NC.exists():
+        _logger.warning("ETOPO land-mask file not found: %s", LAND_MASK_NC)
         return None
     key = str(LAND_MASK_NC)
     if key in _LAND_MASK_CACHE:
         return _LAND_MASK_CACHE[key]
     try:
-        from netCDF4 import Dataset
+        from netCDF4 import Dataset  # type: ignore
 
         with Dataset(LAND_MASK_NC) as nc:
             lat_name = _find_nc_coord(nc, {"lat", "latitude"})
             lon_name = _find_nc_coord(nc, {"lon", "longitude"})
-            var_name = "elevation" if "elevation" in nc.variables else "z"
-            if not lat_name or not lon_name or var_name not in nc.variables:
+            # ETOPO 2022 uses "elevation"; older subsets may use "z" or "bedrock"
+            _elev_candidates = ("elevation", "z", "bedrock", "topo", "height", "Band1")
+            var_name = next((v for v in _elev_candidates if v in nc.variables), "")
+            if not lat_name or not lon_name:
+                _logger.warning(
+                    "ETOPO file missing lat/lon coord. variables found: %s",
+                    list(nc.variables.keys()),
+                )
+                return None
+            if not var_name:
+                _logger.warning(
+                    "ETOPO file missing elevation variable. variables found: %s",
+                    list(nc.variables.keys()),
+                )
                 return None
             values = nc.variables[var_name][:]
             try:
                 values = values.filled(float("nan"))
             except AttributeError:
                 pass
+            arr = values.tolist() if hasattr(values, "tolist") else list(values)
             mask = {
-                "path": current_path,
                 "lats": _to_float_list(nc.variables[lat_name][:]),
                 "lons": _to_float_list(nc.variables[lon_name][:]),
-                "values": values.tolist() if hasattr(values, "tolist") else values,
+                "values": arr,
             }
+            _logger.info(
+                "Land-mask loaded from %s (%d lats × %d lons)",
+                LAND_MASK_NC.name,
+                len(mask["lats"]),
+                len(mask["lons"]),
+            )
             _LAND_MASK_CACHE[key] = mask
             return mask
-    except Exception:
+    except ImportError:
+        _logger.warning("netCDF4 not installed — land mask unavailable")
         return None
+    except Exception as exc:
+        _logger.warning("Failed to load land-mask from %s: %s", LAND_MASK_NC, exc)
+        return None
+
+
+def _compute_hires_land_mask(
+    current_path: Path,
+    west: float,
+    east: float,
+    south: float,
+    north: float,
+    nlat: int = 120,
+    nlon: int = 240,
+) -> list[list[bool]] | None:
+    """Return a high-resolution boolean grid (True=land) sampled from ETOPO.
+
+    Grid is nlat × nlon, row 0 = southernmost latitude, row nlat-1 = northernmost.
+    The frontend must flip the y-axis (canvas y=0 is north) when indexing into this.
+    Returns None when ETOPO mask is unavailable.
+    """
+    mask = _load_land_mask(current_path)
+    if not mask:
+        return None
+
+    lat_range = max(1e-6, north - south)
+    lon_range = max(1e-6, east - west)
+
+    # Try numpy fast path
+    try:
+        import numpy as np
+        m_lats = np.asarray(mask["lats"], dtype=np.float32)
+        m_lons = np.asarray(mask["lons"], dtype=np.float32)
+        m_vals = np.asarray(mask["values"], dtype=np.float32)
+
+        q_lats = np.linspace(south, north, nlat, dtype=np.float32)
+        q_lons = np.linspace(west,  east,  nlon, dtype=np.float32)
+        lat_min, lat_max = float(m_lats.min()), float(m_lats.max())
+        lon_min, lon_max = float(m_lons.min()), float(m_lons.max())
+        lat_in_range = (q_lats >= lat_min) & (q_lats <= lat_max)
+        lon_in_range = (q_lons >= lon_min) & (q_lons <= lon_max)
+
+        # Nearest-index lookup via broadcasting
+        def ni_batch(arr, targets):
+            diffs = np.abs(arr[:, None] - targets[None, :])
+            return np.argmin(diffs, axis=0)
+
+        lat_idx = ni_batch(m_lats, q_lats)  # (nlat,)
+        lon_idx = ni_batch(m_lons, q_lons)  # (nlon,)
+
+        out = []
+        for row_num, li in enumerate(lat_idx):
+            if not bool(lat_in_range[row_num]):
+                out.append([False] * nlon)
+                continue
+            row_elev = m_vals[li, lon_idx]         # (nlon,)
+            row_land = (lon_in_range & np.isfinite(row_elev) & (row_elev > 0)).tolist()
+            out.append(row_land)
+        return out
+    except Exception:
+        pass
+
+    # Pure-Python fallback
+    lat_step = lat_range / max(1, nlat - 1)
+    lon_step = lon_range / max(1, nlon - 1)
+    out = []
+    for i in range(nlat):
+        lat = south + i * lat_step
+        row = [_is_land(mask, lat, west + j * lon_step) for j in range(nlon)]
+        out.append(row)
+    return out
 
 
 def _is_land(mask: dict[str, Any], lat: float, lon: float) -> bool:
@@ -674,7 +827,15 @@ def _is_land(mask: dict[str, Any], lat: float, lon: float) -> bool:
     lons = mask["lons"]
     if not lats or not lons:
         return False
-    if lat < min(lats) or lat > max(lats) or lon < min(lons) or lon > max(lons):
+    # Cache bounds on the mask dict to avoid repeated min/max scans
+    if "lat_min" not in mask:
+        mask["lat_min"] = min(lats)
+        mask["lat_max"] = max(lats)
+        mask["lon_min"] = min(lons)
+        mask["lon_max"] = max(lons)
+    if lat < mask["lat_min"] or lat > mask["lat_max"]:
+        return False
+    if lon < mask["lon_min"] or lon > mask["lon_max"]:
         return False
     i = _nearest_index(lats, lat)
     j = _nearest_index(lons, lon)
@@ -904,6 +1065,9 @@ def _query_grid_netcdf4(
                     "v_grid": v_grid,
                     "land_mask_applied": masked_count,
                     "land_mask_source": str(LAND_MASK_NC) if masked_count else "",
+                    "land_mask_hires": _compute_hires_land_mask(
+                        path, min(west, east), max(west, east), min(south, north), max(south, north)
+                    ),
                     "step": step,
                     "requested_step": requested_step,
                     "auto_step": auto_step,
@@ -954,6 +1118,9 @@ def _query_grid_netcdf4(
             "values": grid,
             "land_mask_applied": masked_count,
             "land_mask_source": str(LAND_MASK_NC) if masked_count else "",
+            "land_mask_hires": _compute_hires_land_mask(
+                path, min(west, east), max(west, east), min(south, north), max(south, north)
+            ),
             "step": step,
             "requested_step": requested_step,
             "auto_step": auto_step,

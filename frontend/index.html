@@ -4,185 +4,266 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Ocean Digital Earth RAG Demo</title>
+  <script>
+    window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/';
+  </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/Widgets/widgets.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.3.1/ol.css">
-  <link rel="stylesheet" href="/assets/app.css?v=20260530-ui2">
+  <link rel="stylesheet" href="/assets/app.css?v=20260531-v4">
+  <style>
+    /* Particle overlay canvas on top of Cesium globe */
+    #particleCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+    /* Legend gradient - driven by JS */
+    .legendGradient {
+      flex: 1;
+      height: 8px;
+      border-radius: 4px;
+      background: linear-gradient(90deg,
+        #313695, #4575b4, #74add1, #e0f3f8, #fee090, #fdae61, #d73027);
+    }
+    [v-cloak] { display: none !important; }
+  </style>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="brandMark" aria-hidden="true"></span>
-      <div>
-        <h1>海洋数字地球</h1>
-        <p id="health">服务状态检查中...</p>
-      </div>
-    </div>
-    <nav class="systemLinks">
-      <a href="/geoserver/web/" target="_blank" rel="noreferrer">GeoServer</a>
-      <a href="/api/health" target="_blank" rel="noreferrer">API</a>
-      <button id="chatToggle" class="iconButton aiMini" title="AI 助手"><span>AI</span></button>
-    </nav>
-  </header>
-
-  <main class="shell">
-    <section class="earthStage">
-      <div id="earth"></div>
-      <div class="reticle" aria-hidden="true"></div>
-    </section>
-
-    <aside class="toolPanel">
-      <div class="panelHeader">
+  <div id="app" v-cloak>
+    <!-- ── Topbar ── -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brandMark" aria-hidden="true"></span>
         <div>
-          <span class="eyebrow">OCEAN LAYERS</span>
-          <h2>要素控制</h2>
+          <h1>海洋数字地球</h1>
+          <p>{{ healthText }}</p>
         </div>
-        <button id="syncBtn" class="iconButton syncButton" title="同步本地 NC/PDF">↻</button>
       </div>
+      <nav class="systemLinks">
+        <a href="/geoserver/web/" target="_blank" rel="noreferrer">GeoServer</a>
+        <a href="/api/health" target="_blank" rel="noreferrer">API</a>
+        <button class="iconButton aiMini" @click="chatOpen = !chatOpen" title="AI 助手"><span>AI</span></button>
+      </nav>
+    </header>
 
-      <section class="deckBlock">
-        <label for="variable">数据集 / 变量</label>
-        <select id="variable"></select>
-        <div class="renderModeGroup" id="renderModeGroup" aria-label="渲染方式">
-          <button class="renderMode active" data-mode="heatmap" title="连续填色栅格">填色</button>
-          <button class="renderMode" data-mode="particles" title="基于数值梯度的流动粒子效果">粒子</button>
-          <button class="renderMode" data-mode="contour" title="等值线叠加">等值线</button>
-          <button class="renderMode" data-mode="points" title="采样点符号图">点图</button>
-        </div>
-        <div class="actionBar">
-          <button id="selectBtn" class="toolButton secondary">框选</button>
-          <button id="queryBtn" class="toolButton primary">渲染</button>
-          <button id="currentDemoBtn" class="toolButton secondary">海流样例</button>
-          <button id="clearBtn" class="toolButton secondary">清除</button>
-        </div>
-        <div class="controlGrid">
-          <label>
-            步长
-            <input id="stepInput" type="number" min="0" max="1000" value="0">
-          </label>
-          <label>
-            格点上限
-            <input id="maxPointsInput" type="number" min="100" max="50000" step="100" value="9000">
-          </label>
-        </div>
+    <!-- ── Main shell ── -->
+    <main class="shell">
+
+      <!-- Earth stage: Cesium + particle canvas overlay -->
+      <section class="earthStage">
+        <div id="earth"></div>
+        <canvas id="particleCanvas" ref="particleCanvas"></canvas>
+        <div class="reticle" aria-hidden="true"></div>
       </section>
 
-      <section class="deckBlock statusBlock">
-        <p id="oceanStatus">地球可旋转浏览；开启框选后在地球上拖拽选择区域。</p>
-        <p id="apiStatus" class="apiStatus">接口：等待请求。</p>
-      </section>
-
-      <section class="deckBlock">
-        <div class="sectionTitle">区域统计</div>
-        <div class="stats" id="stats"></div>
-      </section>
-    </aside>
-
-    <div class="mapDock">
-      <div class="mapHeader">
-        <span>二维定位</span>
-        <span id="vmin">-</span>
-        <div class="legendBar"></div>
-        <span id="vmax">-</span>
-      </div>
-      <div id="map"></div>
-    </div>
-
-    <section id="reportDock" class="reportDock" aria-live="polite">
-      <div class="reportDockHeader">
-        <div>
-          <span class="eyebrow">AI REPORT</span>
-          <h2>报告阅读</h2>
-          <p id="reportMeta">等待生成。</p>
+      <!-- ── Tool panel ── -->
+      <aside class="toolPanel">
+        <div class="panelHeader">
+          <div>
+            <span class="eyebrow">OCEAN LAYERS</span>
+            <h2>要素控制</h2>
+          </div>
+          <button class="iconButton syncButton" @click="syncData" title="同步本地 NC/PDF">↻</button>
         </div>
-        <button id="reportClose" class="iconButton" title="收起报告">×</button>
-      </div>
-      <article id="reportBody" class="reportBody"></article>
-    </section>
-  </main>
 
-  <button id="chatFab" class="chatFab" title="打开 AI 助手">
-    <span class="aiRing" aria-hidden="true"></span>
-    <span class="aiGlyph">AI</span>
-  </button>
-
-  <button id="reportFab" class="reportFab" title="打开报告阅读">
-    <span>报告</span>
-  </button>
-
-  <aside id="chatDrawer" class="chatDrawer">
-    <div class="chatHeader">
-      <div>
-        <span class="eyebrow">MARINE INTELLIGENCE</span>
-        <h2>海洋智能助手</h2>
-        <p id="reportStatus">等待提问。</p>
-      </div>
-      <div class="chatHeaderRight">
-        <!-- GeoAgent 在线指示 -->
-        <span class="geoTag" id="geoTag" title="GeoAgent 状态">GEO</span>
-        <button id="chatClose" class="iconButton" title="关闭">×</button>
-      </div>
-    </div>
-
-    <div id="chatMessages" class="chatMessages">
-      <div class="message ai">可以询问海洋热浪、酸化、渔业风险，也可以结合当前框选区域生成规划建议。框选区域后 AI 会自动获取该海域数据。</div>
-    </div>
-
-    <div class="agentPanel">
-      <div id="agentSummary" class="agentSummary"></div>
-      <div id="agentTrace" class="agentTrace"></div>
-      <div id="docs" class="evidence"></div>
-    </div>
-
-    <div class="chatControls">
-
-      <!-- ① 领域选择 Tab -->
-      <div class="domainTabs" id="domainTabs">
-        <button class="domTab active" data-domain="auto" title="根据问题自动判断领域">🔮 自动</button>
-        <button class="domTab" data-domain="marine"     title="海表温度、盐度、叶绿素等要素">🌊 海洋</button>
-        <button class="domTab" data-domain="stargazing" title="月相、光污染、云量观星分析">🌟 观星</button>
-        <button class="domTab" data-domain="biology"    title="珊瑚白化、赤潮、栖息地">🐠 生物</button>
-        <button class="domTab" data-domain="navigation" title="浪高、风级、航行安全">⚓ 航行</button>
-      </div>
-
-      <!-- ② 快捷问题建议 -->
-      <div class="suggRow" id="suggRow"></div>
-
-      <!-- ③ 问题输入 -->
-      <textarea id="question">请结合海表温度和海洋热浪知识，评估目标海域对珊瑚礁和渔业的风险，并形成规划建议</textarea>
-
-      <!-- ④ 流水线进度条（流式时可见） -->
-      <div class="pipelineBar" id="pipelineBar">
-        <span class="pStep" id="ps-intent">意图</span>
-        <span class="pArrow">›</span>
-        <span class="pStep" id="ps-retrieval">检索</span>
-        <span class="pArrow">›</span>
-        <span class="pStep" id="ps-context">数据</span>
-        <span class="pArrow">›</span>
-        <span class="pStep" id="ps-reasoning">推理</span>
-        <span class="pArrow">›</span>
-        <span class="pStep" id="ps-report">报告</span>
-      </div>
-
-      <!-- ⑤ 高级选项（旧版API备用，折叠） -->
-      <details class="advOpts" id="advOpts">
-        <summary>高级选项（旧版 RAG API）</summary>
-        <div class="row">
-          <select id="backend">
-            <option>auto</option>
-            <option>local</option>
-            <option>ragflow</option>
+        <section class="deckBlock">
+          <label for="variable">数据集 / 变量</label>
+          <select id="variable" v-model="selectedVar">
+            <option v-for="v in variableList" :key="v.key" :value="v.key">
+              {{ v.label }}
+            </option>
           </select>
-          <input id="topk" type="number" min="1" max="12" value="6">
+
+          <div class="renderModeGroup" aria-label="渲染方式">
+            <button
+              v-for="m in renderModes"
+              :key="m.id"
+              class="renderMode"
+              :class="{ active: renderMode === m.id, disabled: !allowedModes.has(m.id) }"
+              :title="m.title"
+              @click="setRenderMode(m.id)"
+            >{{ m.label }}</button>
+          </div>
+
+          <div class="actionBar">
+            <button class="toolButton secondary" :class="{ active: selectMode }" @click="toggleSelect">框选</button>
+            <button class="toolButton primary" :disabled="queryLoading" @click="queryOcean">
+              {{ queryLoading ? '加载中…' : '渲染' }}
+            </button>
+            <button class="toolButton secondary" @click="loadDemoVector">海流样例</button>
+            <button class="toolButton secondary" @click="clearGrid">清除</button>
+          </div>
+
+          <div class="controlGrid">
+            <label>步长<input type="number" v-model.number="stepVal" min="0" max="1000"></label>
+            <label>格点上限<input type="number" v-model.number="maxPoints" min="100" max="50000" step="100"></label>
+          </div>
+
+          <!-- Opacity slider -->
+          <div class="opacityRow">
+            <span>图层透明度</span>
+            <input type="range" v-model.number="layerOpacity" min="0.1" max="1" step="0.05"
+              style="flex:1" @input="updateLayerOpacity">
+            <span>{{ Math.round(layerOpacity * 100) }}%</span>
+          </div>
+        </section>
+
+        <section class="deckBlock statusBlock">
+          <p>{{ oceanStatus }}</p>
+          <p class="apiStatus">{{ apiStatus }}</p>
+        </section>
+
+        <section class="deckBlock">
+          <div class="sectionTitle">区域统计</div>
+          <div class="stats">
+            <template v-if="stats">
+              <div class="statItem"><span>最小</span><b>{{ stats.min }}</b></div>
+              <div class="statItem"><span>最大</span><b>{{ stats.max }}</b></div>
+              <div class="statItem"><span>均值</span><b>{{ stats.mean }}</b></div>
+              <div class="statItem"><span>格点</span><b>{{ stats.count }}</b></div>
+            </template>
+            <span v-else style="color:var(--soft);font-size:12px">框选并渲染后显示</span>
+          </div>
+        </section>
+      </aside>
+
+      <!-- ── Map dock ── -->
+      <div class="mapDock">
+        <div class="mapHeader">
+          <span>二维定位</span>
+          <span>{{ vmin }}</span>
+          <div class="legendGradient" :style="legendStyle"></div>
+          <span>{{ vmax }}</span>
         </div>
-      </details>
+        <div id="map"></div>
+      </div>
 
-      <button id="askBtn">发送</button>
-      <button id="chatClear" class="secondary">清空对话</button>
-    </div>
-  </aside>
+      <!-- ── Report dock ── -->
+      <section id="reportDock" class="reportDock" :class="{ open: reportVisible }" aria-live="polite">
+        <div class="reportDockHeader">
+          <div>
+            <span class="eyebrow">AI REPORT</span>
+            <h2>报告阅读</h2>
+            <p>{{ reportMeta }}</p>
+          </div>
+          <button class="iconButton" @click="reportVisible = false" title="收起报告">×</button>
+        </div>
+        <article class="reportBody" v-html="reportHtml"></article>
+      </section>
+    </main>
 
+    <!-- ── FABs ── -->
+    <button class="chatFab" @click="chatOpen = true" title="打开 AI 助手">
+      <span class="aiRing" aria-hidden="true"></span>
+      <span class="aiGlyph">AI</span>
+    </button>
+    <button class="reportFab" @click="reportVisible = true" v-show="reportHtml" title="打开报告">
+      <span>报告</span>
+    </button>
+
+    <!-- ── Chat drawer ── -->
+    <aside class="chatDrawer" :class="{ open: chatOpen }">
+      <div class="chatHeader">
+        <div>
+          <span class="eyebrow">MARINE INTELLIGENCE</span>
+          <h2>海洋智能助手</h2>
+          <p>{{ reportStatus }}</p>
+        </div>
+        <div class="chatHeaderRight">
+          <span class="geoTag" :class="{ online: geoApiReady }" title="GeoAgent 状态">GEO</span>
+          <button class="iconButton" @click="chatOpen = false" title="关闭">×</button>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="chatMessages" ref="chatMessages">
+        <div
+          v-for="(msg, i) in messages"
+          :key="i"
+          class="message"
+          :class="msg.role"
+          v-html="msg.html || escapeHtml(msg.text || '')"
+        ></div>
+      </div>
+
+      <!-- Agent panels -->
+      <div class="agentPanel" v-if="agentSummary || agentTrace.length">
+        <div class="agentSummary" v-if="agentSummary" v-html="agentSummaryHtml"></div>
+        <div class="agentTrace" v-if="agentTrace.length">
+          <div v-for="(t, i) in agentTrace" :key="i" class="traceItem">
+            <span class="traceNode">{{ t.node }}</span>
+            <span class="traceMode">{{ t.mode }}</span>
+          </div>
+        </div>
+        <div class="evidence" v-if="evidence.length">
+          <div v-for="(d, i) in evidence" :key="i" class="doc" :class="d.verdict">
+            <b>{{ d.verdict === 'keep' ? '✓ 保留' : '· PASS' }}</b>
+            {{ d.title }}
+            <small>score={{ d.score }}</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="chatControls">
+        <!-- Domain tabs -->
+        <div class="domainTabs">
+          <button
+            v-for="d in domains"
+            :key="d.id"
+            class="domTab"
+            :class="{ active: domain === d.id }"
+            :title="d.title"
+            @click="domain = d.id; renderSuggestions()"
+          >{{ d.icon }} {{ d.label }}</button>
+        </div>
+
+        <!-- Quick suggestions -->
+        <div class="suggRow">
+          <button
+            v-for="s in suggestions"
+            :key="s"
+            class="suggChip"
+            @click="question = s"
+          >{{ s }}</button>
+        </div>
+
+        <!-- Question input -->
+        <textarea v-model="question" @keydown.ctrl.enter="sendQuery" @keydown.meta.enter="sendQuery"
+          placeholder="输入海洋相关问题... (Ctrl+Enter 发送)"></textarea>
+
+        <!-- Pipeline bar -->
+        <div class="pipelineBar" v-show="streaming">
+          <span v-for="(s, k) in pipelineSteps" :key="k"
+            class="pStep" :class="s">{{ pipelineLabels[k] }}</span>
+        </div>
+
+        <!-- Advanced options -->
+        <details class="advOpts">
+          <summary>高级选项（旧版 RAG API）</summary>
+          <div class="row">
+            <select v-model="backend"><option>auto</option><option>local</option><option>ragflow</option></select>
+            <input type="number" v-model.number="topk" min="1" max="12">
+          </div>
+        </details>
+
+        <button :disabled="streaming" @click="sendQuery">
+          {{ streaming ? '分析中…' : '发送' }}
+        </button>
+        <button class="secondary" @click="clearChat">清空对话</button>
+      </div>
+    </aside>
+  </div><!-- #app -->
+
+  <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/Cesium.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/ol@10.3.1/dist/ol.js"></script>
-  <script src="/assets/app.js?v=20260531-vector1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.4.27/dist/vue.global.prod.js"></script>
+  <!-- topojson-client for pixel-level land masking (Natural Earth 110m) -->
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <script src="/assets/app.js?v=20260602-localearth-mask"></script>
 </body>
 </html>
