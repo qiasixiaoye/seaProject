@@ -207,7 +207,7 @@ function createFallbackEarthTexture(){
 
 // ── WINDY PARTICLE SYSTEM ─────────────────────────────────────────────────────
 const PARTICLE_COUNT=2400,FADE_FRAMES=18;
-let _particles=[],_animId=null,_viewer=null,_olMap=null,_pCanvas=null,_pData=null;
+let _particles=[],_animId=null,_viewer=null,_olMap=null,_olLabelsLayer=null,_pCanvas=null,_pData=null;
 
 function particleAlpha(age,maxAge,speedT){
   return Math.min(age/FADE_FRAMES,(maxAge-age)/FADE_FRAMES,1)*(0.55+speedT*0.40);
@@ -371,8 +371,17 @@ createApp({
         requestRenderMode:false,targetFrameRate:60,
       });
       _viewer.imageryLayers.removeAll();
+      // Layer 0: 本地离线底图（无 CDN 时保底）
       _viewer.imageryLayers.addImageryProvider(
         new Cesium.SingleTileImageryProvider({url:LOCAL_EARTH_TEXTURE_URL,rectangle:Cesium.Rectangle.MAX_VALUE}));
+      // Layer 1: OSM 在线瓦片（有地名文字，无 maximumLevel 限制）
+      try{
+        _viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+          url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          credit:'© OpenStreetMap contributors',
+          // 不设 maximumLevel，允许任意放大级别加载文字标注
+        }));
+      }catch(e){console.warn('OSM tiles unavailable, falling back to local texture');}
       _viewer.scene.globe.enableLighting=true;
       _viewer.scene.globe.showGroundAtmosphere=true;
       _viewer.scene.skyAtmosphere.show=true;
@@ -398,9 +407,24 @@ createApp({
 
     // ── OpenLayers ──
     initMap(){
+      // CartoDB 分离：底图（无标注） + 数据层（中间） + 标注层（最顶）
+      const cartoBase = new ol.layer.Tile({
+        source: new ol.source.XYZ({
+          url:'https://{a-c}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
+          attributions:'© OpenStreetMap © CartoDB',
+        }),
+        zIndex:0,
+      });
+      _olLabelsLayer = new ol.layer.Tile({
+        source: new ol.source.XYZ({
+          url:'https://{a-c}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
+          attributions:'© OpenStreetMap © CartoDB',
+        }),
+        zIndex:100,  // 始终在热力图之上
+      });
       _olMap=new ol.Map({
         target:'map',
-        layers:[new ol.layer.Tile({source:new ol.source.OSM()})],
+        layers:[cartoBase, _olLabelsLayer],
         view:new ol.View({center:ol.proj.fromLonLat([121,24]),zoom:7}),
         controls:ol.control.defaults.defaults({zoom:false}),
       });
@@ -511,19 +535,25 @@ createApp({
         if(!data.u_grid||!data.v_grid){
           this.oceanStatus='该变量无 u/v 矢量场，粒子流不可用。请选 HYCOM 海流数据或点击「海流样例」。';
           const c=gridCanvas(data,W,H);
-          applyBackendHiresMaskToCanvas(c,data);
-          await applyOptionalVectorLandMask(c,data);
+          try{
+            applyBackendHiresMaskToCanvas(c,data);
+            await applyOptionalVectorLandMask(c,data);
+          }catch(e){console.warn('[LandMask]',e.message);}
           this.updateCesiumRaster(data,c);this.updateOlRaster(data,c);return;
         }
         // Dim background for Cesium (particles prominent) — use 28% alpha directly
         const bgCesium=gridCanvas(data,W,H,0.28);
-        applyBackendHiresMaskToCanvas(bgCesium,data);
-        await applyOptionalVectorLandMask(bgCesium,data);
+        try{
+          applyBackendHiresMaskToCanvas(bgCesium,data);
+          await applyOptionalVectorLandMask(bgCesium,data);
+        }catch(e){console.warn('[LandMask-particle-bg]',e.message);}
         this.updateCesiumRaster(data,bgCesium);
         // OL map shows full heatmap with land mask
         const olHeatmap=gridCanvas(data,W,H);
-        applyBackendHiresMaskToCanvas(olHeatmap,data);
-        await applyOptionalVectorLandMask(olHeatmap,data);
+        try{
+          applyBackendHiresMaskToCanvas(olHeatmap,data);
+          await applyOptionalVectorLandMask(olHeatmap,data);
+        }catch(e){console.warn('[LandMask-particle-ol]',e.message);}
         this.updateOlRaster(data,olHeatmap);
         startParticleAnimation(data);
       }else{
@@ -531,8 +561,10 @@ createApp({
         if(mode==='contour') c=contourCanvas(data,W,H);
         else if(mode==='points') c=pointCanvas(data,W,H);
         else c=gridCanvas(data,W,H);
-        applyBackendHiresMaskToCanvas(c,data);
-        await applyOptionalVectorLandMask(c,data);
+        try{
+          applyBackendHiresMaskToCanvas(c,data);
+          await applyOptionalVectorLandMask(c,data);
+        }catch(e){console.warn('[LandMask]',e.message);}
         this.updateCesiumRaster(data,c);this.updateOlRaster(data,c);
       }
     },
@@ -554,8 +586,9 @@ createApp({
       this.olLayer=new ol.layer.Image({
         source:new ol.source.ImageStatic({url:canvas.toDataURL('image/png'),imageExtent:ext,projection:'EPSG:3857'}),
         opacity:this.layerOpacity,
+        zIndex:10,  // 在底图(0)之上、标注层(100)之下
       });
-      _olMap.getLayers().insertAt(1,this.olLayer);
+      _olMap.addLayer(this.olLayer);  // zIndex=10 自动排在底图(0)和标注(100)之间
       _olMap.getView().fit(ext,{padding:[20,20,20,20],duration:300});
     },
     updateLayerOpacity(){if(this.olLayer)this.olLayer.setOpacity(this.layerOpacity);},
@@ -687,6 +720,43 @@ async function fetchLandGeoJson(url) {
   throw new Error('invalid GeoJSON response');
 }
 
+
+// ── LAND MASK HELPERS (called from applyRender) ───────────────────────────────
+
+/**
+ * Step 1 — Backend hires mask: use the 120×240 boolean grid returned by the
+ * API in data.land_mask_hires to zero-out land pixels on the canvas.
+ * Synchronous; safe to call even when land_mask_hires is absent (no-op).
+ */
+function applyBackendHiresMaskToCanvas(canvas, data) {
+  if (!data?.land_mask_hires) return;          // no backend mask → skip
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const imgData = ctx.getImageData(0, 0, W, H);
+  const px = imgData.data;
+
+  for (let y = 0; y < H; y++) {
+    const ny = H <= 1 ? 0 : y / (H - 1);
+    for (let x = 0; x < W; x++) {
+      const nx = W <= 1 ? 0 : x / (W - 1);
+      if (isHiresLand(data, nx, ny)) {
+        px[(y * W + x) * 4 + 3] = 0;           // transparent
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+/**
+ * Step 2 — Vector land mask: use GeoServer WFS / CDN TopoJSON polygons.
+ * Async; fires applyLandMaskToCanvas which caches the bitmap per bbox.
+ * No-op if data.bounds is absent.
+ */
+async function applyOptionalVectorLandMask(canvas, data) {
+  if (!data?.bounds) return;
+  await applyLandMaskToCanvas(canvas, data.bounds);
+}
+
 /** Prefer local GeoServer Natural Earth polygons; fall back to CDN TopoJSON. */
 async function loadLandGeo(bounds) {
   if (bounds) {
@@ -715,25 +785,42 @@ async function loadLandGeo(bounds) {
   }
 
   if (_landGeoFeatures) return _landGeoFeatures;
+    // CDN TopoJSON fallback
   try {
-    if (typeof topojson === 'undefined') throw new Error('topojson-client unavailable');
+    const cdnCtrl = new AbortController();
+    const cdnTid  = setTimeout(() => cdnCtrl.abort(), 10000); // 10 s CDN timeout
     const topo = await fetch(
-      'https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json'
-    ).then(r => r.json());
-    // topojson-client converts to GeoJSON
+      'https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json',
+      { signal: cdnCtrl.signal }
+    ).then(r => { clearTimeout(cdnTid); return r.json(); })
+     .catch(e => { clearTimeout(cdnTid); throw e; });
     const geo = topojson.feature(topo, topo.objects.land);
     _landGeoFeatures = geo.features?.length ? geo.features : [geo];
+    console.info('[LandMask] Loaded Natural Earth 110m from CDN');
     return _landGeoFeatures;
   } catch (e) {
-    console.warn('[LandMask] TopoJSON load failed:', e.message, '— land masking disabled');
+    console.warn('[LandMask] CDN fallback also failed:', e.message);
     return null;
   }
 }
 
+/** Fetch GeoJSON from any URL (GeoServer WFS or CDN), with timeout. */
+async function fetchLandGeoJson(url, timeoutMs = 5000) {
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { signal: ctrl.signal });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    return (data.features || [data]);
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 /**
- * Build an ImageData bitmap where R=255 means land, R=0 means ocean.
- * Resolution W×H, covering geographic bbox.
- * Cached by bbox key.
+ * Build an ImageData bitmap (W×H) where R=255=land, R=0=ocean.
+ * Covers geographic bbox. Cached per bbox key.
  */
 async function buildLandMaskBitmap(bounds, W = 512, H = 256) {
   const { west, east, south, north } = bounds;
@@ -745,10 +832,10 @@ async function buildLandMaskBitmap(bounds, W = 512, H = 256) {
 
   const canvas = mkCanvas(W, H);
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fff'; // land = white
+  ctx.fillStyle = '#fff';
 
   const lonX = lon => ((lon - west) / (east - west)) * W;
-  const latY = lat => (1 - (lat - south) / (north - south)) * H; // canvas y flipped
+  const latY = lat => (1 - (lat - south) / (north - south)) * H;
 
   ctx.beginPath();
   for (const feat of features) {
@@ -765,57 +852,28 @@ async function buildLandMaskBitmap(bounds, W = 512, H = 256) {
       for (const poly of g.coordinates) for (const ring of poly) drawRing(ring);
     }
   }
-  ctx.fill('evenodd'); // proper polygon winding rule
+  ctx.fill('evenodd');
 
   const imgData = ctx.getImageData(0, 0, W, H);
   _landMaskCache.set(key, imgData);
   return imgData;
 }
 
-function applyBackendHiresMaskToCanvas(canvas, data) {
-  const lm = data?.land_mask_hires;
-  if (!lm?.length) return;
-  const rows = lm.length, cols = lm[0]?.length || 0;
-  if (!rows || !cols) return;
-
-  const W = canvas.width, H = canvas.height;
-  const ctx = canvas.getContext('2d');
-  const imgData = ctx.getImageData(0, 0, W, H);
-  const px = imgData.data;
-
-  for (let y = 0; y < H; y++) {
-    const ny = H <= 1 ? 0 : y / (H - 1);
-    const li = Math.round(Math.max(0, Math.min(rows - 1, (1 - ny) * (rows - 1))));
-    const row = lm[li];
-    for (let x = 0; x < W; x++) {
-      const nx = W <= 1 ? 0 : x / (W - 1);
-      const lj = Math.round(Math.max(0, Math.min(cols - 1, nx * (cols - 1))));
-      if (row?.[lj] === true) px[(y * W + x) * 4 + 3] = 0;
-    }
-  }
-  ctx.putImageData(imgData, 0, 0);
-}
-
-async function applyOptionalVectorLandMask(canvas, data) {
-  if (data?.land_mask_hires?.length) return;
-  await applyLandMaskToCanvas(canvas, data.bounds);
-}
-
 /**
- * Post-process a heatmap/contour canvas: clear alpha for every land pixel.
- * Uses the same W×H as the canvas for 1:1 pixel accuracy.
+ * Post-process canvas: zero alpha for every land pixel.
+ * Uses same resolution as canvas for 1:1 accuracy.
  */
 async function applyLandMaskToCanvas(canvas, bounds) {
   const W = canvas.width, H = canvas.height;
   const lm = await buildLandMaskBitmap(bounds, W, H);
-  if (!lm) return; // no land data — skip gracefully
+  if (!lm) return;
 
   const ctx = canvas.getContext('2d');
   const imgData = ctx.getImageData(0, 0, W, H);
   const px = imgData.data, lpx = lm.data;
 
   for (let i = 0; i < px.length; i += 4) {
-    if (lpx[i] > 128) px[i + 3] = 0; // white=land → transparent
+    if (lpx[i] > 128) px[i + 3] = 0; // land → transparent
   }
   ctx.putImageData(imgData, 0, 0);
 }

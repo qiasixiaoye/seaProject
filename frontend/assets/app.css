@@ -146,14 +146,21 @@ h2 {
 .earthStage {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  overflow: hidden;
   background: #020409;
 }
 #earth {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   background: #020409;
 }
 #earth.selecting { cursor: crosshair; }
+#earth .cesium-viewer,
 #earth .cesium-widget,
 #earth .cesium-widget canvas {
   width: 100%;
@@ -1053,3 +1060,148 @@ textarea {
 .advOpts .row {
   margin-top: 6px;
 }
+
+/* ── Vue 3 additions ─────────────────────────────────────────────────────── */
+
+/* Particle canvas overlay (sits on top of Cesium div) */
+#particleCanvas {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Render mode disabled state */
+.renderMode.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.renderMode.active {
+  background: var(--cyan);
+  color: var(--void);
+}
+
+/* Stats grid */
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.statItem {
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.statItem span { display: block; color: var(--soft); font-size: 10px; margin-bottom: 2px; }
+.statItem b    { display: block; font-size: 15px; }
+
+/* Legend gradient bar */
+.legendGradient {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+}
+
+/* Suggestion chips */
+.suggRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.suggChip {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--soft);
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.suggChip:hover { border-color: var(--cyan); color: var(--text); }
+
+/* Pipeline bar */
+.pipelineBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--soft);
+  padding: 4px 0;
+}
+.pStep { padding: 2px 7px; border-radius: 10px; border: 1px solid transparent; transition: all .2s; }
+.pStep.active { border-color: var(--cyan); color: var(--cyan); }
+.pStep.done   { border-color: var(--teal); color: var(--teal); background: rgba(15,159,145,.12); }
+
+/* GeoAgent online indicator */
+.geoTag { font-size: 10px; padding: 2px 7px; border-radius: 10px;
+  border: 1px solid var(--soft); color: var(--soft); }
+.geoTag.online { border-color: var(--cyan); color: var(--cyan); }
+
+/* Chat drawer open state */
+.chatDrawer.open { transform: translateX(0) !important; }
+
+/* Report dock open state */
+.reportDock.open { transform: translateX(0) !important; }
+
+/* AI blinking cursor */
+.cursor { display: inline-block; animation: blink 0.9s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* v-cloak hides uncompiled template */
+[v-cloak] { display: none !important; }
+
+/* Report HTML formatting */
+.reportBody h2 { font-size: 16px; margin: 12px 0 6px; color: var(--cyan); }
+.reportBody h3 { font-size: 14px; margin: 10px 0 4px; color: var(--gold); }
+.reportBody h4 { font-size: 13px; margin: 8px 0 3px; color: var(--soft); }
+.reportBody code { background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.reportBody strong { color: var(--text); }
+.reportBody ul  { margin: 4px 0 4px 18px; padding: 0; }
+.reportBody li  { margin: 2px 0; line-height: 1.5; }
+.reportBody hr  { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
+
+/* Opacity slider row */
+.opacityRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--soft);
+  margin-top: 6px;
+}
+.opacityRow input[type=range] { accent-color: var(--cyan); }
+.opacityRow span:last-child { min-width: 30px; text-align: right; }
+
+/* Agent trace items */
+.traceItem {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  padding: 2px 0;
+  color: var(--soft);
+}
+.traceNode { color: var(--cyan); font-weight: 600; }
+.traceMode { opacity: 0.7; }
+
+/* Evidence / document cards */
+.doc {
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.doc.keep { border-color: rgba(16,185,129,.4); background: rgba(16,185,129,.06); }
+.doc.pass { border-color: rgba(100,116,139,.3); opacity: 0.65; }
+.doc b { margin-right: 6px; }
+.doc small { float: right; opacity: 0.6; }
+
+/* Query button disabled/loading */
+.toolButton:disabled { opacity: 0.55; cursor: not-allowed; }
