@@ -170,12 +170,12 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
             "/api/ocean/vector-field":   self._vector_field,
             "/a2a/tasks":                self._a2a_create_task,
         }
+        handler = routes.get(path)
         # A2A dynamic: /a2a/tasks/{id}
         if not handler and path.startswith("/a2a/tasks/"):
             task_id2 = path[len("/a2a/tasks/"):]
             self._a2a_cancel_task(task_id2)
             return
-        handler = routes.get(path)
         if handler:
             handler()
         else:
