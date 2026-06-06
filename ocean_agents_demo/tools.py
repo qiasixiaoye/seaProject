@@ -53,13 +53,11 @@ def retrieve_documents(query: str, top_k: int = 6, backend: str = "auto") -> dic
     return {
         "backend": used,
         "results": [
-            {
-                "id": d.id,
-                "title": d.title,
-                "score": round(d.score, 4),
-                "source": d.source,
-                "snippet": (d.abstract or "")[:200],
-            }
+            dict(
+                core.doc_to_evidence_dict(d),
+                score=round(d.score, 4),
+                snippet=(d.abstract or "")[:200],
+            )
             for d in docs
         ],
     }

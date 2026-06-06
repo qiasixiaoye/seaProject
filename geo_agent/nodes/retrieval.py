@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from geo_agent import llm
@@ -30,7 +31,8 @@ def run(state: GeoAgentState) -> dict[str, Any]:
             if docs:
                 trace.append({"node": "RetrievalNode", "mode": "tool-loop",
                                "count": len(docs), "backend": used,
-                               "queries": info.get("queries", [])})
+                               "queries": info.get("queries", []),
+                               "tool_calls": info.get("tool_calls", [])})
                 return {
                     "candidates": [_doc_to_dict(d) for d in docs],
                     "backend_used": used,
@@ -61,29 +63,49 @@ def _tool_loop_retrieve(
 
     collected: dict[str, Any] = {}
     queries_used: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
     backend_ref = {"v": "local"}
 
     def dispatch(name: str, args: dict[str, Any]) -> Any:
+        started = time.time()
+        call = {
+            "schema_version": "tool_call.v1",
+            "tool_name": name,
+            "args_summary": _safe_args(args),
+            "success": False,
+            "latency_ms": None,
+            "result_size": 0,
+        }
         if name == "retrieve_documents":
-            q = str(args.get("query") or question)
-            queries_used.append(q)
-            tk = int(args.get("top_k") or top_k)
-            bk = backend if backend in {"ragflow", "local"} else str(args.get("backend") or backend)
-            docs, used = core.retrieve(
-                {"retrieval_query": q, "keywords": [], "original_question": question},
-                tk, bk,
-            )
-            backend_ref["v"] = used
-            for d in docs:
-                key = d.id or d.title
-                if key not in collected or d.score > collected[key].score:
-                    collected[key] = d
-            return {
-                "backend": used,
-                "count": len(docs),
-                "results": [{"id": d.id, "title": d.title, "score": round(d.score, 4)}
-                            for d in docs[:3]],
-            }
+            try:
+                q = str(args.get("query") or question)
+                queries_used.append(q)
+                tk = int(args.get("top_k") or top_k)
+                bk = backend if backend in {"ragflow", "local"} else str(args.get("backend") or backend)
+                docs, used = core.retrieve(
+                    {"retrieval_query": q, "keywords": [], "original_question": question},
+                    tk, bk,
+                )
+                backend_ref["v"] = used
+                for d in docs:
+                    key = d.id or d.title
+                    if key not in collected or d.score > collected[key].score:
+                        collected[key] = d
+                result = {
+                    "backend": used,
+                    "count": len(docs),
+                    "results": [{"id": d.id, "title": d.title, "score": round(d.score, 4)}
+                                for d in docs[:3]],
+                }
+                call["success"] = True
+                call["result_size"] = len(docs)
+                return result
+            except Exception as exc:
+                call["error"] = f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                call["latency_ms"] = round((time.time() - started) * 1000, 2)
+                tool_calls.append(call)
         raise KeyError(f"unknown tool: {name}")
 
     retrieve_spec = [{
@@ -112,7 +134,17 @@ def _tool_loop_retrieve(
         max_steps=5,
     )
     candidates = sorted(collected.values(), key=lambda d: d.score, reverse=True)[:top_k]
-    return candidates, backend_ref["v"], {"queries": queries_used}
+    return candidates, backend_ref["v"], {"queries": queries_used, "tool_calls": tool_calls}
+
+
+def _safe_args(args: dict[str, Any]) -> dict[str, Any]:
+    out = dict(args or {})
+    for key in list(out):
+        if any(secret in key.lower() for secret in ("key", "token", "secret", "password")):
+            out[key] = "***"
+    if "query" in out:
+        out["query"] = str(out["query"])[:240]
+    return out
 
 
 def _deterministic_retrieve(
@@ -141,6 +173,9 @@ def _deterministic_retrieve(
 
 def _doc_to_dict(doc: Any) -> dict[str, Any]:
     from dataclasses import asdict
+    from ocean_agents_demo.core import Doc, doc_to_evidence_dict
+    if isinstance(doc, Doc):
+        return doc_to_evidence_dict(doc)
     try:
         return asdict(doc)
     except Exception:

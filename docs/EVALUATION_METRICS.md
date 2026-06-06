@@ -179,6 +179,76 @@ Required fields:
 The frontend quality panel uses `evaluation.metrics`; the trace list uses
 `trace[].node`, `trace[].mode`, `trace[].status`, and `trace[].elapsed_ms`.
 
+## EvidenceChunk Contract
+
+Every retrieved document or chunk should carry an `evidence` block. Legacy
+fields such as `title`, `abstract`, `score`, and `metadata` remain available,
+but new consumers should prefer the normalized block:
+
+```json
+{
+  "schema_version": "evidence_chunk.v1",
+  "doc_id": "document-id",
+  "chunk_id": "chunk-id",
+  "dataset_id": "ragflow-dataset-id",
+  "document_name": "paper.pdf",
+  "title": "Paper title · p.3",
+  "source": "RAGFlow dataset=...; document=...; pages=3",
+  "source_path": "relative/or/original/source",
+  "section": "Results",
+  "section_path": ["Results", "Figure 3"],
+  "page": 3,
+  "pages": [3, 4],
+  "bbox": null,
+  "content_type": "paragraph",
+  "year": 2024,
+  "backend": "ragflow",
+  "route": "ragflow_vector",
+  "rank_before": 1,
+  "rank_after": 1,
+  "similarity": 0.82,
+  "vector_similarity": 0.8,
+  "term_similarity": 0.3,
+  "rerank_score": null,
+  "rerank_reason": "not_reranked"
+}
+```
+
+Required fields for retrieval evaluation:
+
+| Field | Purpose |
+|---|---|
+| `doc_id` | Document-level gold matching. |
+| `chunk_id` | Chunk-level gold matching. |
+| `page` / `pages` | Citation and PDF auditability. |
+| `section` / `section_path` | Chunk boundary and answer support analysis. |
+| `content_type` | Distinguish paragraph, table, figure caption, metadata, etc. |
+| `route` | Show whether evidence came from local keyword, RAGFlow vector, hybrid, or rerank path. |
+| `rank_before` / `rank_after` | Required for reranker evaluation. |
+| `similarity` / `rerank_score` | Required for ranking and threshold analysis. |
+
+## ToolCallTrace Contract
+
+Tool calls should appear inside a trace item as `tool_calls[]`:
+
+```json
+{
+  "schema_version": "tool_call.v1",
+  "tool_name": "retrieve_documents",
+  "args_summary": {
+    "query": "marine heatwave coral reef",
+    "top_k": 6,
+    "backend": "auto"
+  },
+  "success": true,
+  "latency_ms": 421.6,
+  "result_size": 6
+}
+```
+
+If a call fails, `success` must be `false` and `error` should contain a compact
+machine-readable message. Secret-like arguments must be redacted.
+
 ## Dataset Annotation Schema
 
 Future labeled rows should use this structure:

@@ -42,6 +42,108 @@ class Doc:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+EVIDENCE_SCHEMA_VERSION = "evidence_chunk.v1"
+
+
+def enrich_evidence_metadata(
+    docs: list[Doc],
+    route: str,
+    start_rank: int = 1,
+) -> list[Doc]:
+    """Attach a normalized EvidenceChunk contract to Doc.metadata."""
+    for offset, doc in enumerate(docs):
+        rank = start_rank + offset
+        meta = dict(doc.metadata or {})
+        pages = _metadata_pages(meta)
+        content_type = str(meta.get("content_type") or _infer_content_type(doc))
+        evidence = {
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "doc_id": str(meta.get("doc_id") or meta.get("document_id") or doc.id),
+            "chunk_id": str(meta.get("chunk_id") or doc.id),
+            "dataset_id": str(meta.get("dataset_id") or ""),
+            "document_name": str(meta.get("document_name") or doc.title),
+            "title": doc.title,
+            "source": doc.source,
+            "source_path": str(meta.get("source_path") or doc.source),
+            "section": str(meta.get("section") or meta.get("section_path") or ""),
+            "section_path": meta.get("section_path") or [],
+            "page": pages[0] if pages else None,
+            "pages": pages,
+            "bbox": meta.get("bbox"),
+            "content_type": content_type,
+            "year": doc.year or None,
+            "backend": doc.backend,
+            "route": route,
+            "rank_before": int(meta.get("rank_before") or rank),
+            "rank_after": int(meta.get("rank_after") or rank),
+            "similarity": _as_float(meta.get("similarity", doc.score), default=doc.score),
+            "vector_similarity": _nullable_float(meta.get("vector_similarity")),
+            "term_similarity": _nullable_float(meta.get("term_similarity")),
+            "rerank_score": _nullable_float(meta.get("rerank_score")),
+            "rerank_reason": str(meta.get("rerank_reason") or "not_reranked"),
+        }
+        meta.update(evidence)
+        meta["evidence"] = evidence
+        doc.metadata = meta
+    return docs
+
+
+def doc_to_evidence_dict(doc: Doc) -> dict[str, Any]:
+    """Serialize a Doc with a stable evidence block and convenience fields."""
+    data = asdict(doc)
+    evidence = dict((doc.metadata or {}).get("evidence") or {})
+    if not evidence:
+        enrich_evidence_metadata([doc], doc.backend)
+        evidence = dict((doc.metadata or {}).get("evidence") or {})
+        data = asdict(doc)
+    data["evidence"] = evidence
+    for key in (
+        "doc_id", "chunk_id", "dataset_id", "document_name", "page", "pages",
+        "section", "section_path", "content_type", "rank_before", "rank_after",
+        "rerank_score", "rerank_reason", "similarity", "vector_similarity",
+        "term_similarity",
+    ):
+        data[key] = evidence.get(key)
+    return data
+
+
+def _metadata_pages(meta: dict[str, Any]) -> list[int]:
+    raw = meta.get("pages")
+    if raw is None and meta.get("page") is not None:
+        raw = [meta.get("page")]
+    pages: list[int] = []
+    if isinstance(raw, (list, tuple)):
+        for item in raw:
+            try:
+                page = int(item)
+            except (TypeError, ValueError):
+                continue
+            if page not in pages:
+                pages.append(page)
+    return pages
+
+
+def _infer_content_type(doc: Doc) -> str:
+    if doc.kind == "ragflow_chunk":
+        return "paragraph"
+    if doc.kind == "local_pdf_metadata":
+        return "document_metadata"
+    if doc.kind == "local_pdf":
+        return "pdf_text"
+    if doc.kind == "local_markdown":
+        return "markdown_section"
+    return doc.kind or "text"
+
+
+def _nullable_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def tokenize(text: str) -> set[str]:
     out: set[str] = set()
     for part in TOKEN_RE.findall(text.lower()):
@@ -247,7 +349,8 @@ def local_retrieve(query: str, top_k: int) -> list[Doc]:
         doc.score = min(1.0, len(overlap) / max(1.0, math.sqrt(len(q)) * 5))
         if doc.score:
             docs.append(doc)
-    return sorted(docs, key=lambda d: d.score, reverse=True)[:top_k]
+    ranked = sorted(docs, key=lambda d: d.score, reverse=True)[:top_k]
+    return enrich_evidence_metadata(ranked, route="local_keyword")
 
 
 def rag_status() -> dict[str, Any]:
@@ -311,7 +414,7 @@ def ragflow_retrieve(query: str, top_k: int) -> list[Doc]:
     for i, chunk in enumerate(chunks[:top_k], 1):
         doc = _ragflow_doc_from_chunk(chunk, i, catalog)
         docs.append(doc)
-    return docs
+    return enrich_evidence_metadata(docs, route="ragflow_vector")
 
 
 @lru_cache(maxsize=1)
@@ -600,8 +703,8 @@ def _linear_pipeline(question: str, top_k: int = 6, threshold: float = 0.22, bac
         "question": question,
         "report": final_report,
         "llm": deepseek_client.status(),
-        "kept_documents": [asdict(d) for d in kept],
-        "passed_documents": [asdict(d) for d in passed],
+        "kept_documents": [doc_to_evidence_dict(d) for d in kept],
+        "passed_documents": [doc_to_evidence_dict(d) for d in passed],
     }
     if trace:
         result["trace"] = events

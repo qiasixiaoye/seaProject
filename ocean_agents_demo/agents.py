@@ -531,8 +531,8 @@ class Orchestrator(Agent):
             "revisions": state.revisions,
             "elapsed_ms": elapsed_ms,
             "llm": deepseek_client.status(),
-            "kept_documents": [asdict(d) for d in state.kept],
-            "passed_documents": [asdict(d) for d in state.passed],
+            "kept_documents": [core.doc_to_evidence_dict(d) for d in state.kept],
+            "passed_documents": [core.doc_to_evidence_dict(d) for d in state.passed],
         }
         if trace:
             result["trace"] = events

@@ -122,6 +122,5 @@ def dispatch(tool_name: str, args: dict[str, Any] | None = None, agent: str = "G
             int(args.get("top_k") or 6),
             str(args.get("backend") or "auto"),
         )
-        return {"backend": backend, "documents": [getattr(d, "__dict__", d) for d in docs]}
+        return {"backend": backend, "documents": [core.doc_to_evidence_dict(d) for d in docs]}
     raise KeyError(f"tool has no local dispatcher: {tool_name}")
-
