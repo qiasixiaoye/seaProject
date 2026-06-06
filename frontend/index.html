@@ -53,6 +53,13 @@
     .kbDocItem { display:flex; align-items:center; gap:5px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.05); font-size:12px; }
     .kbDocKind { background:rgba(15,111,159,.25); color:#7dd3fc; border-radius:3px; padding:1px 4px; font-size:10px; flex-shrink:0; }
     .kbDocTitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink,#e0eaf5); }
+    .qualityPanel { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:10px 12px; border-top:1px solid rgba(255,255,255,.08); border-bottom:1px solid rgba(255,255,255,.08); }
+    .qualityCard { min-width:0; padding:8px; border:1px solid rgba(255,255,255,.08); border-radius:6px; background:rgba(3,12,24,.35); }
+    .qualityLabel { display:block; font-size:11px; color:var(--soft,#8ba0b2); }
+    .qualityValue { display:block; margin-top:3px; font-size:16px; color:var(--ink,#e0eaf5); font-weight:700; font-variant-numeric:tabular-nums; }
+    .qualitySub { display:block; margin-top:2px; font-size:11px; color:var(--soft,#8ba0b2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .traceStatus { margin-left:auto; font-size:10px; color:#7dd3fc; text-transform:uppercase; }
+    .traceTime { font-size:10px; color:var(--soft,#8ba0b2); font-variant-numeric:tabular-nums; }
   </style>
 </head>
 <body>
@@ -264,6 +271,13 @@
           </div>
           <button class="iconButton" @click="reportVisible = false" title="收起报告">×</button>
         </div>
+        <div class="qualityPanel" v-if="evaluation">
+          <div class="qualityCard" v-for="card in qualityCards" :key="card.label">
+            <span class="qualityLabel">{{ card.label }}</span>
+            <span class="qualityValue">{{ card.value }}</span>
+            <span class="qualitySub">{{ card.sub }}</span>
+          </div>
+        </div>
         <article class="reportBody" v-html="reportHtml"></article>
       </section>
     </main>
@@ -309,6 +323,8 @@
           <div v-for="(t, i) in agentTrace" :key="i" class="traceItem">
             <span class="traceNode">{{ t.node }}</span>
             <span class="traceMode">{{ t.mode }}</span>
+            <span class="traceStatus">{{ t.status || 'ok' }}</span>
+            <span class="traceTime" v-if="t.elapsed_ms">{{ Math.round(t.elapsed_ms) }}ms</span>
           </div>
         </div>
         <div class="evidence" v-if="evidence.length">

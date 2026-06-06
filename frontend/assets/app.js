@@ -337,6 +337,7 @@ createApp({
     domain:'auto',question:'请结合海表温度和海洋热浪知识，评估目标海域对珊瑚礁和渔业的风险，并形成规划建议',
     backend:'auto',topk:6,streaming:false,streamEs:null,
     agentTrace:[],agentSummary:null,agentSummaryHtml:'',evidence:[],
+    evaluation:null,
     geoApiReady:false,
     pipelineSteps:{intent:'',planner:'',retrieval:'',context:'',reasoning:'',visualization:'',report:'',evaluator:''},
     // ── 知识库管理 ──
@@ -364,6 +365,18 @@ createApp({
       if(v===undefined||v===null) return '';
       // 尝试将 "days since ..." 解析为可读日期（简单处理）
       return typeof v==='string' ? v : String(v);
+    },
+    qualityCards(){
+      const m=this.evaluation?.metrics||{};
+      const ret=m.retrieval||{}, ev=m.evidence||{}, ans=m.answer||{}, tools=m.tools||{}, sys=m.system||{};
+      return [
+        {label:'总分',value:this.evaluation?.score??'-',sub:this.evaluation?.grade||'-'},
+        {label:'检索',value:`${ret.kept_count??0}/${ret.candidate_count??0}`,sub:ret.backend||'-'},
+        {label:'引用覆盖',value:this._pct(ev.citation_coverage),sub:`证据 ${ev.evidence_count??0}`},
+        {label:'数据支撑',value:this._pct(ans.data_grounding),sub:`问题 ${ans.critic_issue_count??0}`},
+        {label:'工具',value:tools.tool_call_count??0,sub:tools.tool_success_rate==null?'未记录':this._pct(tools.tool_success_rate)},
+        {label:'耗时',value:sys.elapsed_ms?`${(sys.elapsed_ms/1000).toFixed(1)}s`:'-',sub:`tokens ${sys.token_usage?.total_tokens??0}`},
+      ];
     },
   },
 
@@ -728,6 +741,7 @@ createApp({
       this.messages.push({role:'user',text:q});
       this.streaming=true;this.reportStatus='分析中…';
       this.agentTrace=[];this.evidence=[];
+      this.evaluation=null;
       Object.keys(this.pipelineSteps).forEach(k=>{this.pipelineSteps[k]='';});
       if(this.geoApiReady) await this._geoStream(q);
       else                 await this._legacyAsk(q);
@@ -763,6 +777,7 @@ createApp({
         else if(type==='done'){
           this.pipelineSteps.report='done';this.pipelineSteps.evaluator='done';
           if(msg.trace&&Array.isArray(msg.trace))this.agentTrace=msg.trace;
+          this.evaluation=msg.evaluation||null;
           const fh=this._md(buf);
           this.messages.splice(msgIdx,1,{role:'ai',html:fh});
           this.reportHtml=fh;
@@ -790,6 +805,7 @@ createApp({
         const html=data.report?this._md(data.report):`<em>${data.error||'无报告'}</em>`;
         this.messages.push({role:'ai',html});this.reportHtml=html;
         if(Array.isArray(data.trace))this.agentTrace=data.trace;
+        this.evaluation=data.evaluation||null;
         this.reportMeta=`领域：${data.domain||this.domain} · 修订：${data.revisions||0}${data.evaluation?.score!=null?` · 评测：${data.evaluation.score}`:''}`;
       }catch(e){this.messages.push({role:'ai',text:`❌ ${e.message}`});}
       finally{this.streaming=false;this.reportStatus='分析完成。';this._scrollChat();}
@@ -800,12 +816,14 @@ createApp({
       this.messages=[{role:'ai',text:'对话已清空。'}];
       this.reportHtml='';this.agentTrace=[];this.evidence=[];
       this.agentSummary=null;this.agentSummaryHtml='';
+      this.evaluation=null;
       Object.keys(this.pipelineSteps).forEach(k=>{this.pipelineSteps[k]='';});
     },
     _scrollChat(){this.$nextTick(()=>{const el=this.$refs.chatMessages;if(el)el.scrollTop=el.scrollHeight;});},
 
     // ── Helpers ──
     escapeHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');},
+    _pct(v){return v==null?'-':`${Math.round(Number(v)*100)}%`;},
     renderSuggestions(){},
     _md(text){
       if(!text)return'';

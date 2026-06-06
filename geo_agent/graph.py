@@ -31,7 +31,7 @@ import uuid
 from typing import Any
 
 from geo_agent import llm
-from geo_agent.state import GeoAgentState, merge_trace
+from geo_agent.state import GeoAgentState, merge_trace, normalize_trace
 from geo_agent.nodes import context, critic, data, evaluator, intent, planner, reasoning, report, retrieval, screening, visualization
 
 log = logging.getLogger("geo_agent.graph")
@@ -303,6 +303,7 @@ def run(
 
     elapsed_ms = round((time.time() - started) * 1000, 2)
     token_usage = llm.get_usage()
+    trace = normalize_trace(final_state.get("trace", []))
     evaluation = dict(final_state.get("evaluation", {}) or {})
     if evaluation:
         metrics = dict(evaluation.get("metrics", {}) or {})
@@ -335,6 +336,6 @@ def run(
         "llm_configured": llm.configured(),
     }
     if trace_enabled:
-        result["trace"] = final_state.get("trace", [])
+        result["trace"] = trace
 
     return result

@@ -24,6 +24,46 @@ def merge_trace(left: list[dict[str, Any]] | None, right: list[dict[str, Any]] |
     return merged
 
 
+def normalize_trace(trace: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Return trace entries with a stable schema for APIs and UI consumers."""
+    out: list[dict[str, Any]] = []
+    for index, item in enumerate(trace or []):
+        if not isinstance(item, dict):
+            item = {"raw": item}
+        node = str(item.get("node") or item.get("agent") or f"Step{index + 1}")
+        mode = str(item.get("mode") or item.get("status") or "default")
+        status = "error" if item.get("error") else str(item.get("status") or "ok")
+        normalized: dict[str, Any] = {
+            "index": index,
+            "node": node,
+            "mode": mode,
+            "status": status,
+            "elapsed_ms": item.get("elapsed_ms"),
+            "input_summary": item.get("input_summary", {}),
+            "output_summary": item.get("output_summary") or _trace_output_summary(item),
+        }
+        if item.get("error"):
+            normalized["error"] = item.get("error")
+        normalized["details"] = {
+            k: v for k, v in item.items()
+            if k not in {
+                "index", "node", "agent", "mode", "status", "elapsed_ms",
+                "input_summary", "output_summary", "error",
+            }
+        }
+        out.append(normalized)
+    return out
+
+
+def _trace_output_summary(item: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "domain", "backend", "count", "queries", "vars_queried", "vars_ok",
+        "vars_missing", "kept", "passed", "layers", "warnings", "score",
+        "grade", "passed", "revisions", "chars", "quality_flags",
+    )
+    return {key: item[key] for key in keys if key in item}
+
+
 class TokenUsage(TypedDict, total=False):
     prompt_tokens: int
     completion_tokens: int

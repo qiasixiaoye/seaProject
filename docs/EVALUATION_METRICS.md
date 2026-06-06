@@ -141,6 +141,44 @@ Metrics that require labeled data or LLM judging should be returned as `null`
 until that evaluator is implemented. This keeps the API stable while making
 missing evaluation capacity explicit.
 
+## Trace Schema
+
+Every trace item returned by report APIs is normalized before it reaches the UI:
+
+```json
+{
+  "index": 0,
+  "node": "RetrievalNode",
+  "mode": "multi-query",
+  "status": "ok",
+  "elapsed_ms": null,
+  "input_summary": {},
+  "output_summary": {
+    "backend": "ragflow",
+    "count": 6
+  },
+  "details": {
+    "queries": ["marine heatwave coral reef"]
+  }
+}
+```
+
+Required fields:
+
+| Field | Meaning |
+|---|---|
+| `index` | Stable order in the pipeline trace. |
+| `node` | Agent or node name. |
+| `mode` | Execution mode, such as `llm`, `heuristic`, `multi-query`, or `nc_query`. |
+| `status` | `ok` or `error`. |
+| `elapsed_ms` | Node runtime when available. `null` means not yet instrumented. |
+| `input_summary` | Safe, compact input metadata. |
+| `output_summary` | Compact result counts, scores, backend, or domain metadata. |
+| `details` | Remaining node-specific metadata for debugging. |
+
+The frontend quality panel uses `evaluation.metrics`; the trace list uses
+`trace[].node`, `trace[].mode`, `trace[].status`, and `trace[].elapsed_ms`.
+
 ## Dataset Annotation Schema
 
 Future labeled rows should use this structure:

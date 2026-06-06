@@ -36,7 +36,7 @@ if str(ROOT) not in sys.path:
 from geo_agent import graph as geo_graph
 from geo_agent import llm as geo_llm
 from geo_agent.catalog import agent_card, agent_catalog
-from geo_agent.state import merge_trace
+from geo_agent.state import merge_trace, normalize_trace
 from geo_agent.tool_registry import list_tools
 from geo_agent.tools import ocean as ocean_tools
 from ocean_agents_demo import deepseek_client
@@ -382,10 +382,11 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
                 token_usage,
             )
             state["evaluation"] = evaluation
+            trace = normalize_trace(state.get("trace", []))
             sse({"type": "done", "elapsed_ms": elapsed,
                  "token_usage": token_usage,
                  "domain": state.get("domain", "general"),
-                 "trace": state.get("trace", []),
+                 "trace": trace,
                  "evaluation": evaluation,
                  "visualization": state.get("visualization", {}),
                  "critic": state.get("critic_result", {}),
