@@ -375,11 +375,18 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
             from geo_agent.nodes import evaluator as evaluator_node
             state.update(evaluator_node.run(state))
             elapsed = round((time.time() - started) * 1000, 2)
+            token_usage = geo_llm.get_usage()
+            evaluation = _attach_system_metrics(
+                state.get("evaluation", {}),
+                elapsed,
+                token_usage,
+            )
+            state["evaluation"] = evaluation
             sse({"type": "done", "elapsed_ms": elapsed,
-                 "token_usage": geo_llm.get_usage(),
+                 "token_usage": token_usage,
                  "domain": state.get("domain", "general"),
                  "trace": state.get("trace", []),
-                 "evaluation": state.get("evaluation", {}),
+                 "evaluation": evaluation,
                  "visualization": state.get("visualization", {}),
                  "critic": state.get("critic_result", {}),
                  "revisions": state.get("revisions", 0)})
@@ -619,6 +626,19 @@ def _variables(self):
 def _tool_catalog() -> list[dict]:
     from geo_agent.tools import tool_specs
     return [{"name": t["name"], "description": t["description"]} for t in tool_specs()]
+
+
+def _attach_system_metrics(evaluation: dict, elapsed_ms: float, token_usage: dict) -> dict:
+    out = dict(evaluation or {})
+    if not out:
+        return out
+    metrics = dict(out.get("metrics", {}) or {})
+    metrics["system"] = {
+        "elapsed_ms": elapsed_ms,
+        "token_usage": token_usage,
+    }
+    out["metrics"] = metrics
+    return out
 
 
 def run_server(port: int = PORT) -> None:

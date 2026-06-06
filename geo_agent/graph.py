@@ -303,6 +303,14 @@ def run(
 
     elapsed_ms = round((time.time() - started) * 1000, 2)
     token_usage = llm.get_usage()
+    evaluation = dict(final_state.get("evaluation", {}) or {})
+    if evaluation:
+        metrics = dict(evaluation.get("metrics", {}) or {})
+        metrics["system"] = {
+            "elapsed_ms": elapsed_ms,
+            "token_usage": token_usage,
+        }
+        evaluation["metrics"] = metrics
 
     result: dict[str, Any] = {
         "task_id": task_id,
@@ -317,7 +325,7 @@ def run(
         "risk_hypotheses": final_state.get("risk_hypotheses", []),
         "visualization": final_state.get("visualization", {}),
         "critic_result": final_state.get("critic_result", {}),
-        "evaluation": final_state.get("evaluation", {}),
+        "evaluation": evaluation,
         "revisions": final_state.get("revisions", 0),
         "kept_documents": final_state.get("kept_docs", []),
         "passed_documents": final_state.get("passed_docs", []),
