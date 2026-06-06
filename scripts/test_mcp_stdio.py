@@ -61,6 +61,19 @@ def request_batch() -> list[dict[str, Any]]:
                 "arguments": {"include_variables": False},
             },
         },
+        {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "query_ocean_data",
+                "arguments": {
+                    "bounds": {"west": 110, "east": 130, "south": 10, "north": 30},
+                    "max_points": 300,
+                    "include_grid": False,
+                },
+            },
+        },
         {"jsonrpc": "2.0", "id": 4, "method": "resources/list", "params": {}},
         {
             "jsonrpc": "2.0",
@@ -97,7 +110,7 @@ def main() -> int:
         raise SystemExit(proc.returncode)
 
     responses = parse_frames(proc.stdout)
-    assert len(responses) == 6, f"expected 6 responses, got {len(responses)}"
+    assert len(responses) == 7, f"expected 7 responses, got {len(responses)}"
 
     init = assert_ok(responses[0], 1)
     assert init["serverInfo"]["name"] == "ocean-geo-agent"
@@ -112,16 +125,22 @@ def main() -> int:
     dataset_payload = json.loads(tool_call["content"][0]["text"])
     assert "datasets" in dataset_payload
 
-    resources = assert_ok(responses[3], 4).get("resources", [])
+    ocean_call = assert_ok(responses[3], 7)
+    assert ocean_call.get("isError") is False
+    ocean_payload = json.loads(ocean_call["content"][0]["text"])
+    assert ocean_payload.get("grid_omitted") is True
+    assert "stats" in ocean_payload and "values" not in ocean_payload
+
+    resources = assert_ok(responses[4], 4).get("resources", [])
     resource_uris = {item.get("uri") for item in resources}
     assert {"ocean://datasets", "ocean://knowledge"} <= resource_uris
 
-    resource_read = assert_ok(responses[4], 5)
+    resource_read = assert_ok(responses[5], 5)
     contents = resource_read.get("contents", [])
     assert contents and contents[0].get("uri") == "ocean://datasets"
     assert "datasets" in json.loads(contents[0].get("text", "{}"))
 
-    assert_ok(responses[5], 6)
+    assert_ok(responses[6], 6)
     print(json.dumps({
         "status": "ok",
         "responses": len(responses),

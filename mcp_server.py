@@ -136,6 +136,11 @@ TOOLS: list[dict[str, Any]] = [
                 "time_index":  {"type": "integer", "description": "时间步索引（从 0 开始）。", "default": 0},
                 "depth_index": {"type": "integer", "description": "深度层索引（从 0 开始）。", "default": 0},
                 "max_points":  {"type": "integer", "description": "最大格点数（默认 4000）。", "default": 4000},
+                "include_grid": {
+                    "type": "boolean",
+                    "description": "是否返回完整网格数组；默认 false，避免 MCP 客户端收到过大响应。",
+                    "default": False,
+                },
             },
             "required": ["bounds"],
         },
@@ -246,7 +251,58 @@ RESOURCES: list[dict[str, Any]] = [
 
 def _tool_query_ocean_data(args: dict) -> dict:
     from ocean_agents_demo.nc_data import query_grid
-    return query_grid(args)
+    payload = dict(args or {})
+    payload["bounds"] = _validate_bbox(payload.get("bounds") or payload)
+    payload["max_points"] = _bounded_int(payload.get("max_points"), 100, 5000, 1000)
+    payload["time_index"] = _bounded_int(payload.get("time_index"), 0, 100000, 0)
+    payload["depth_index"] = _bounded_int(payload.get("depth_index"), 0, 100000, 0)
+    include_grid = bool(payload.pop("include_grid", False))
+    result = query_grid(payload)
+    if include_grid:
+        return result
+    compact_keys = {
+        "dataset", "variable", "long_name", "units", "bounds", "shape", "stats",
+        "time_index", "depth_index", "selected_time", "selected_depth",
+        "render_time_ms", "category", "render_modes", "particle_ready",
+        "requested_step", "auto_step",
+    }
+    compact = {key: result.get(key) for key in compact_keys if key in result}
+    compact["grid_omitted"] = True
+    compact["grid_fields"] = [
+        key for key in ("values", "u_grid", "v_grid", "speed_grid", "lats", "lons")
+        if key in result
+    ]
+    return compact
+
+
+def _bounded_int(value: Any, low: int, high: int, default: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(low, min(high, number))
+
+
+def _validate_bbox(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        raise ValueError("bounds must be an object with west/east/south/north")
+    out: dict[str, float] = {}
+    for key in ("west", "east", "south", "north"):
+        if key not in value:
+            raise ValueError(f"bounds.{key} is required")
+        try:
+            out[key] = float(value[key])
+        except (TypeError, ValueError):
+            raise ValueError(f"bounds.{key} must be a number") from None
+    if not (-180 <= out["west"] <= 180 and -180 <= out["east"] <= 180):
+        raise ValueError("bounds longitude must be within [-180, 180]")
+    if not (-90 <= out["south"] <= 90 and -90 <= out["north"] <= 90):
+        raise ValueError("bounds latitude must be within [-90, 90]")
+    if out["west"] >= out["east"]:
+        raise ValueError("bounds.west must be less than bounds.east")
+    if out["south"] >= out["north"]:
+        raise ValueError("bounds.south must be less than bounds.north")
+    return out
 
 
 def _tool_run_ocean_report(args: dict) -> dict:

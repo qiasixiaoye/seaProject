@@ -118,3 +118,4 @@ expected methods for each issue.
 | 2026-06-07 | `EvidenceChunk` contract added to retrieval outputs for local and RAGFlow documents; `ToolCallTrace` contract added to RetrievalNode tool-loop calls. | In progress |
 | 2026-06-07 | Deterministic rerank fields added: `rank_before`, `rank_after`, `rerank_score`, and `rerank_reason`. External cross-encoder/BGE reranker remains future work. | In progress |
 | 2026-06-07 | MCP stdio smoke test added for `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, and `ping`. | In progress |
+| 2026-06-07 | MCP `query_ocean_data` now validates bbox/index/max_points and returns compact stats/metadata by default; full grids require `include_grid=true`. | In progress |
