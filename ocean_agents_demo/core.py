@@ -550,14 +550,84 @@ def _as_float(value: Any, default: float = 0.0) -> float:
 
 
 def retrieve(intent: dict[str, Any], top_k: int, backend: str) -> tuple[list[Doc], str]:
+    recall_k = max(top_k, min(30, top_k * 3))
     if backend in {"auto", "ragflow"}:
         try:
-            docs = ragflow_retrieve(intent["retrieval_query"], top_k)
-            return docs, "ragflow"
+            docs = ragflow_retrieve(intent["retrieval_query"], recall_k)
+            return rerank_evidence_docs(intent, docs, top_k), "ragflow"
         except Exception:
             if backend == "ragflow":
                 raise
-    return local_retrieve(intent["retrieval_query"], top_k), "local"
+    return rerank_evidence_docs(intent, local_retrieve(intent["retrieval_query"], recall_k), top_k), "local"
+
+
+def rerank_evidence_docs(intent: dict[str, Any], docs: list[Doc], top_k: int) -> list[Doc]:
+    """Deterministic reranker used until an external rerank model is configured."""
+    if not docs:
+        return []
+    query_text = " ".join([
+        str(intent.get("retrieval_query") or ""),
+        " ".join(str(x) for x in intent.get("keywords", []) or []),
+        str(intent.get("original_question") or ""),
+    ])
+    q = {t for t in tokenize(query_text) if len(t) >= 2}
+    scored: list[tuple[float, int, Doc, str]] = []
+    for rank_before, doc in enumerate(docs, 1):
+        text = " ".join([doc.title, " ".join(doc.topics), doc.abstract])
+        d_tokens = {t for t in tokenize(text) if len(t) >= 2}
+        overlap = q & d_tokens
+        semantic = len(overlap) / max(4.0, math.sqrt(max(1, len(q))) * 4)
+        metadata_bonus = _rerank_metadata_bonus(doc)
+        rerank_score = round(
+            0.62 * min(1.0, max(0.0, doc.score))
+            + 0.30 * min(1.0, semantic)
+            + 0.08 * metadata_bonus,
+            4,
+        )
+        reason = _rerank_reason(doc, overlap, metadata_bonus)
+        meta = dict(doc.metadata or {})
+        meta["rank_before"] = rank_before
+        meta["rerank_score"] = rerank_score
+        meta["rerank_reason"] = reason
+        doc.metadata = meta
+        scored.append((rerank_score, -rank_before, doc, reason))
+
+    reranked = [item[2] for item in sorted(scored, key=lambda x: (x[0], x[1]), reverse=True)]
+    selected = reranked[:top_k]
+    route = str((selected[0].metadata or {}).get("route") or selected[0].backend)
+    for rank_after, doc in enumerate(selected, 1):
+        meta = dict(doc.metadata or {})
+        meta["rank_after"] = rank_after
+        doc.metadata = meta
+    return enrich_evidence_metadata(selected, route=route)
+
+
+def _rerank_metadata_bonus(doc: Doc) -> float:
+    meta = doc.metadata or {}
+    content_type = str(meta.get("content_type") or _infer_content_type(doc))
+    bonus = 0.0
+    if meta.get("pages"):
+        bonus += 0.25
+    if content_type in {"paragraph", "pdf_text", "markdown_section"}:
+        bonus += 0.25
+    if doc.year:
+        bonus += 0.15
+    if doc.source:
+        bonus += 0.10
+    return min(1.0, bonus)
+
+
+def _rerank_reason(doc: Doc, overlap: set[str], metadata_bonus: float) -> str:
+    parts = []
+    if overlap:
+        preview = ", ".join(sorted(overlap, key=len, reverse=True)[:5])
+        parts.append(f"term_overlap={preview}")
+    else:
+        parts.append("term_overlap=none")
+    if metadata_bonus:
+        parts.append(f"metadata_bonus={metadata_bonus:.2f}")
+    parts.append(f"base_similarity={doc.score:.4f}")
+    return "; ".join(parts)
 
 
 def screen(intent: dict[str, Any], docs: list[Doc], threshold: float) -> tuple[list[Doc], list[Doc], list[dict[str, Any]]]:

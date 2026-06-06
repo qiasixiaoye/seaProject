@@ -31,6 +31,8 @@ def run(state: GeoAgentState) -> dict[str, Any]:
             "avg_candidate_score": _avg_score(candidates, "score"),
             "avg_kept_score": _avg_score(kept, "decision_score", fallback_key="score"),
             "top_score": _top_score(candidates),
+            "avg_rerank_score": _avg_score(candidates, "rerank_score"),
+            "top_rerank_score": _top_score_by_key(candidates, "rerank_score"),
             "recall_at_k": None,
             "precision_at_k": None,
             "mrr": None,
@@ -148,10 +150,14 @@ def _avg_score(items: list[dict[str, Any]], key: str, fallback_key: str | None =
 
 
 def _top_score(items: list[dict[str, Any]]) -> float | None:
+    return _top_score_by_key(items, "score")
+
+
+def _top_score_by_key(items: list[dict[str, Any]], key: str) -> float | None:
     vals: list[float] = []
     for item in items:
         try:
-            vals.append(float(item.get("score")))
+            vals.append(float(item.get(key)))
         except (TypeError, ValueError):
             continue
     return round(max(vals), 4) if vals else None
