@@ -32,7 +32,7 @@ from typing import Any
 
 from geo_agent import llm
 from geo_agent.state import GeoAgentState, merge_trace
-from geo_agent.nodes import context, critic, intent, reasoning, report, retrieval, screening
+from geo_agent.nodes import context, critic, data, evaluator, intent, planner, reasoning, report, retrieval, screening, visualization
 
 log = logging.getLogger("geo_agent.graph")
 
@@ -56,8 +56,14 @@ def build_graph():
     def retrieval_node(state: GeoAgentState) -> dict[str, Any]:
         return retrieval.run(state)
 
+    def planner_node(state: GeoAgentState) -> dict[str, Any]:
+        return planner.run(state)
+
     def context_node(state: GeoAgentState) -> dict[str, Any]:
         return context.run(state)
+
+    def data_node(state: GeoAgentState) -> dict[str, Any]:
+        return data.run(state)
 
     def screening_node(state: GeoAgentState) -> dict[str, Any]:
         return screening.run(state)
@@ -73,6 +79,12 @@ def build_graph():
     def critic_node(state: GeoAgentState) -> dict[str, Any]:
         return critic.run(state)
 
+    def visualization_node(state: GeoAgentState) -> dict[str, Any]:
+        return visualization.run(state)
+
+    def evaluator_node(state: GeoAgentState) -> dict[str, Any]:
+        return evaluator.run(state)
+
     def should_revise(state: GeoAgentState) -> str:
         """条件边：是否需要修订报告。"""
         cr = state.get("critic_result", {})
@@ -80,40 +92,48 @@ def build_graph():
         max_rev = state.get("max_revisions", 1)
         if not cr.get("passed", True) and revisions < max_rev:
             return "revise"
-        return "end"
+        return "evaluate"
 
     graph = StateGraph(GeoAgentState)
 
     # 添加节点
     graph.add_node("intent", intent_node)
+    graph.add_node("planner", planner_node)
     graph.add_node("retrieval", retrieval_node)
     graph.add_node("context", context_node)
+    graph.add_node("data", data_node)
     graph.add_node("screening", screening_node)
     graph.add_node("reasoning", reasoning_node)
+    graph.add_node("visualization", visualization_node)
     graph.add_node("report", report_node)
     graph.add_node("critic", critic_node)
+    graph.add_node("evaluator", evaluator_node)
 
     # 连接边
     graph.add_edge(START, "intent")
+    graph.add_edge("intent", "planner")
 
-    # 并行 fan-out: intent → retrieval + context
-    graph.add_edge("intent", "retrieval")
-    graph.add_edge("intent", "context")
+    # 并行 fan-out: planner → retrieval + context
+    graph.add_edge("planner", "retrieval")
+    graph.add_edge("planner", "context")
 
-    # fan-in: retrieval + context → screening
-    graph.add_edge("retrieval", "screening")
-    graph.add_edge("context", "screening")
+    # fan-in: retrieval + context → data → screening
+    graph.add_edge("retrieval", "data")
+    graph.add_edge("context", "data")
 
+    graph.add_edge("data", "screening")
     graph.add_edge("screening", "reasoning")
-    graph.add_edge("reasoning", "report")
+    graph.add_edge("reasoning", "visualization")
+    graph.add_edge("visualization", "report")
     graph.add_edge("report", "critic")
 
     # 条件边：Critic 反思循环
     graph.add_conditional_edges(
         "critic",
         should_revise,
-        {"revise": "report", "end": END},
+        {"revise": "report", "evaluate": "evaluator"},
     )
+    graph.add_edge("evaluator", END)
 
     return graph.compile()
 
@@ -131,13 +151,16 @@ def run_linear(state: GeoAgentState) -> GeoAgentState:
                 state[k] = v
 
     merge(intent.run(state))
+    merge(planner.run(state))
 
     # 伪并行：顺序但都跑
     merge(retrieval.run(state))
     merge(context.run(state))
 
+    merge(data.run(state))
     merge(screening.run(state))
     merge(reasoning.run(state))
+    merge(visualization.run(state))
     merge(report.run(state))
     merge(critic.run(state))
 
@@ -148,6 +171,7 @@ def run_linear(state: GeoAgentState) -> GeoAgentState:
         merge(report.run(state, feedback=feedback))
         merge(critic.run(state))
 
+    merge(evaluator.run(state))
     return state
 
 
@@ -172,6 +196,7 @@ def run_parallel_linear(state: GeoAgentState) -> GeoAgentState:
                 state[k] = v
 
     merge(intent.run(state))
+    merge(planner.run(state))
 
     # 并行
     try:
@@ -185,8 +210,10 @@ def run_parallel_linear(state: GeoAgentState) -> GeoAgentState:
     merge(ret_result)
     merge(ctx_result)
 
+    merge(data.run(state))
     merge(screening.run(state))
     merge(reasoning.run(state))
+    merge(visualization.run(state))
     merge(report.run(state))
     merge(critic.run(state))
 
@@ -196,6 +223,7 @@ def run_parallel_linear(state: GeoAgentState) -> GeoAgentState:
         merge(report.run(state, feedback=feedback))
         merge(critic.run(state))
 
+    merge(evaluator.run(state))
     return state
 
 
@@ -282,10 +310,14 @@ def run(
         "domain": final_state.get("domain", ""),
         "report": final_state.get("report", ""),
         "intent": final_state.get("intent", {}),
+        "execution_plan": final_state.get("execution_plan", {}),
         "ocean_data": final_state.get("ocean_data", {}),
+        "data_context": final_state.get("data_context", {}),
         "domain_analysis": final_state.get("domain_analysis", {}),
         "risk_hypotheses": final_state.get("risk_hypotheses", []),
+        "visualization": final_state.get("visualization", {}),
         "critic_result": final_state.get("critic_result", {}),
+        "evaluation": final_state.get("evaluation", {}),
         "revisions": final_state.get("revisions", 0),
         "kept_documents": final_state.get("kept_docs", []),
         "passed_documents": final_state.get("passed_docs", []),

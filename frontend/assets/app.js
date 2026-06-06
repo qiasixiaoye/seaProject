@@ -313,7 +313,10 @@ const RENDER_MODES=[
   {id:'contour',  label:'等值线',title:'等值线叠加'},
   {id:'points',   label:'点图',  title:'采样点符号图'},
 ];
-const PIPELINE_LABELS={intent:'意图',retrieval:'检索',context:'数据',reasoning:'推理',report:'报告'};
+const PIPELINE_LABELS={
+  intent:'意图',planner:'规划',retrieval:'检索',context:'数据',
+  reasoning:'推理',visualization:'渲染',report:'报告',evaluator:'评测'
+};
 
 // ── VUE 3 APP ─────────────────────────────────────────────────────────────────
 const{createApp}=Vue;
@@ -335,7 +338,17 @@ createApp({
     backend:'auto',topk:6,streaming:false,streamEs:null,
     agentTrace:[],agentSummary:null,agentSummaryHtml:'',evidence:[],
     geoApiReady:false,
-    pipelineSteps:{intent:'',retrieval:'',context:'',reasoning:'',report:''},
+    pipelineSteps:{intent:'',planner:'',retrieval:'',context:'',reasoning:'',visualization:'',report:'',evaluator:''},
+    // ── 知识库管理 ──
+    knowledgeOpen:false,
+    knowledgeDocs:{local_count:0,ragflow_count:0,local_docs:[],ragflow_docs:[]},
+    kbFile:null, kbFileName:'', kbUploading:false, kbUploadMsg:'', kbUploadOk:false,
+    // ── 时间轴 / 深度层 ──
+    timeIndex:0, depthIndex:0,
+    timeCount:0, depthCount:0,
+    timeValues:[], depthValues:[], depthUnits:'m',
+    playing:false, playTimer:null, playInterval:1000,
+    datasetMeta:{},  // dataset_id → {time_count,depth_count,depth_values,time_units,...}
   };},
 
   computed:{
@@ -345,13 +358,34 @@ createApp({
     currentMeta(){return this.variableList.find(v=>v.key===this.selectedVar)?.meta||null;},
     allowedModes(){return new Set(this.currentMeta?.render_modes||['heatmap','contour','points']);},
     legendStyle(){return{background:this.legendCssStr};},
+    selectedTimeLabel(){
+      if(!this.timeValues||!this.timeValues.length) return '';
+      const v=this.timeValues[this.timeIndex];
+      if(v===undefined||v===null) return '';
+      // 尝试将 "days since ..." 解析为可读日期（简单处理）
+      return typeof v==='string' ? v : String(v);
+    },
   },
 
-  watch:{renderMode(){if(this.gridData) this.applyRender(this.gridData).catch(()=>{});}},
+  watch:{
+    renderMode(){if(this.gridData) this.applyRender(this.gridData).catch(()=>{});},
+    selectedVar(key){
+      // 切换数据集时同步 time/depth 元数据
+      const dsId=(key||'').split('::')[0];
+      const meta=this.datasetMeta[dsId]||{};
+      this.timeCount=meta.time_count||0;
+      this.depthCount=meta.depth_count||0;
+      this.timeValues=meta.time_values||[];
+      this.depthValues=meta.depth_values||[];
+      this.depthUnits=meta.depth_units||'m';
+      this.timeIndex=0; this.depthIndex=0;
+      this.stopPlayback();
+    },
+  },
 
   mounted(){
     _pCanvas=this.$refs.particleCanvas;
-    this.checkHealth();this.checkGeoApi();this.loadDatasets();
+    this.checkHealth();this.checkGeoApi();this.loadDatasets();this.loadKbDocs();
     this.$nextTick(()=>requestAnimationFrame(()=>{this.initCesium();this.initMap();this._drawSelectionRect(this.selection);this.resizeAll();}));
     window.addEventListener('resize',()=>{
       if(_pCanvas){_pCanvas.width=0;_pCanvas.height=0;}
@@ -446,8 +480,23 @@ createApp({
       try{
         const d=await fetch('/api/ocean/datasets').then(r=>r.json());
         const list=[];
-        for(const ds of(d.datasets||[])) for(const v of(ds.variables||[]))
-          list.push({key:`${ds.id}::${v.name}`,label:`${ds.id} / ${v.name} — ${v.long_name||''} (${v.units||''})`,meta:v});
+        const meta={};
+        for(const ds of(d.datasets||[])){
+          // 存储每个数据集的 time/depth 元数据
+          meta[ds.id]={
+            time_count:  ds.time_count  || 0,
+            depth_count: ds.depth_count || 0,
+            time_dim:    ds.time_dim    || '',
+            depth_dim:   ds.depth_dim   || '',
+            time_values: ds.time_values || [],
+            depth_values:ds.depth_values|| [],
+            time_units:  ds.time_units  || '',
+            depth_units: ds.depth_units || 'm',
+          };
+          for(const v of(ds.variables||[]))
+            list.push({key:`${ds.id}::${v.name}`,label:`${ds.id} / ${v.name} — ${v.long_name||''} (${v.units||''})`,meta:v});
+        }
+        this.datasetMeta=meta;
         this.variableList=list;
         const preferred=list.find(v=>v.key==='sst_oisst_taiwan_small::sst')
           ||list.find(v=>/_taiwan_small::/.test(v.key))
@@ -460,6 +509,49 @@ createApp({
       this.apiStatus='同步中…';
       try{await fetch('/api/sync',{method:'POST'});await this.loadDatasets();this.apiStatus='同步完成。';}
       catch(e){this.apiStatus=`同步失败：${e.message}`;}
+    },
+
+    // ── 知识库管理 ──────────────────────────────────────────────────────────
+    async loadKbDocs(){
+      try{
+        const d=await fetch('/api/rag/documents').then(r=>r.json());
+        this.knowledgeDocs={
+          local_count:  d.local?.count  || 0,
+          ragflow_count:d.ragflow?.count || 0,
+          local_docs:   d.local?.documents  || [],
+          ragflow_docs: d.ragflow?.documents || [],
+        };
+      }catch(e){/* 静默失败 */}
+    },
+    onKbFileChange(e){
+      const f=e.target.files?.[0];
+      if(f){this.kbFile=f;this.kbFileName=f.name;this.kbUploadMsg='';}
+    },
+    async uploadKbDoc(){
+      if(!this.kbFile)return;
+      this.kbUploading=true;this.kbUploadMsg='';
+      try{
+        const fd=new FormData();
+        fd.append('file',this.kbFile);
+        const res=await fetch('/api/rag/upload',{method:'POST',body:fd});
+        const d=await res.json();
+        if(!res.ok) throw new Error(d.error||res.statusText);
+        this.kbUploadOk=true;
+        this.kbUploadMsg=d.message||`上传成功：${d.filename}`;
+        this.kbFile=null;this.kbFileName='';
+        await this.loadKbDocs();
+      }catch(e){
+        this.kbUploadOk=false;
+        this.kbUploadMsg=`上传失败：${e.message}`;
+      }finally{this.kbUploading=false;}
+    },
+    async syncKbLocal(){
+      try{
+        const d=await fetch('/api/rag/sync-local',{method:'POST'}).then(r=>r.json());
+        this.kbUploadOk=true;
+        this.kbUploadMsg=d.message||`扫描完成，共 ${d.local_count} 篇文档。`;
+        await this.loadKbDocs();
+      }catch(e){this.kbUploadOk=false;this.kbUploadMsg=`扫描失败：${e.message}`;}
     },
 
     // ── Selection ──
@@ -498,7 +590,7 @@ createApp({
         const t0=Date.now();
         const res=await fetch('/api/ocean/query',{
           method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({dataset,variable,bounds:this.selection,max_points:this.maxPoints,step:this.stepVal||0}),
+          body:JSON.stringify({dataset,variable,bounds:this.selection,max_points:this.maxPoints,step:this.stepVal||0,time_index:this.timeIndex,depth_index:this.depthIndex}),
         });
         if(!res.ok){const e=await res.json();throw new Error(e.message||e.error||res.statusText);}
         const data=await res.json();
@@ -519,6 +611,34 @@ createApp({
         this._drawSelectionRect(this.selection);
         await this.queryOcean();
       }else{this.oceanStatus='未找到矢量场数据（HYCOM u/v）。';}
+    },
+
+    // ── 时间轴动画 ──────────────────────────────────────────────────────────
+    playTimelapse(){
+      if(this.timeCount<=1){this.oceanStatus='当前数据集只有单一时间步，无法播放。';return;}
+      this.playing=true;
+      const step=()=>{
+        if(!this.playing)return;
+        this.timeIndex=(this.timeIndex+1)%this.timeCount;
+        this.queryOcean().then(()=>{
+          if(this.playing) this.playTimer=setTimeout(step,this.playInterval);
+        }).catch(()=>{this.playing=false;});
+      };
+      // 立刻渲染当前帧，再开始循环
+      this.queryOcean().then(()=>{
+        if(this.playing) this.playTimer=setTimeout(step,this.playInterval);
+      }).catch(()=>{this.playing=false;});
+    },
+    stopPlayback(){
+      this.playing=false;
+      if(this.playTimer){clearTimeout(this.playTimer);this.playTimer=null;}
+    },
+    onTimeSliderChange(){
+      this.stopPlayback();
+      this.queryOcean();
+    },
+    onDepthChange(){
+      this.queryOcean();
     },
 
     // ── Apply render ──
@@ -626,10 +746,11 @@ createApp({
         let msg;try{msg=JSON.parse(e.data);}catch{return;}
         const{type,data:d,content:c}=msg;
         if(type==='domain'){this.pipelineSteps.intent='active';}
-        else if(type==='intent'){this.pipelineSteps.intent='done';this.pipelineSteps.retrieval='active';this.pipelineSteps.context='active';}
+        else if(type==='intent'){this.pipelineSteps.intent='done';this.pipelineSteps.planner='active';}
+        else if(type==='planner'){this.pipelineSteps.planner='done';this.pipelineSteps.retrieval='active';this.pipelineSteps.context='active';}
         else if(type==='context'){this.pipelineSteps.context='done';this.pipelineSteps.retrieval='done';this.pipelineSteps.reasoning='active';}
         else if(type==='analysis'){
-          this.pipelineSteps.reasoning='done';this.pipelineSteps.report='active';
+          this.pipelineSteps.reasoning='done';this.pipelineSteps.visualization='done';this.pipelineSteps.report='active';
           const p=d||c||{};
           const kept=p.kept_docs||p.kept_documents||[];
           const passed=p.passed_docs||p.passed_documents||[];
@@ -640,12 +761,13 @@ createApp({
         }
         else if(type==='token'){buf+=(d||c||'');upd();}
         else if(type==='done'){
-          this.pipelineSteps.report='done';
+          this.pipelineSteps.report='done';this.pipelineSteps.evaluator='done';
           if(msg.trace&&Array.isArray(msg.trace))this.agentTrace=msg.trace;
           const fh=this._md(buf);
           this.messages.splice(msgIdx,1,{role:'ai',html:fh});
           this.reportHtml=fh;
-          this.reportMeta=`领域：${msg.domain||this.domain} · 修订：${msg.revisions||0} · ${((msg.elapsed_ms||0)/1000).toFixed(1)}s`;
+          const evalScore=msg.evaluation?.score!=null?` · 评测：${msg.evaluation.score}`:'';
+          this.reportMeta=`领域：${msg.domain||this.domain} · 修订：${msg.revisions||0}${evalScore} · ${((msg.elapsed_ms||0)/1000).toFixed(1)}s`;
           buf='';this.streaming=false;this.reportStatus='分析完成。';es.close();this._scrollChat();
         }
         else if(type==='error'){
@@ -662,11 +784,13 @@ createApp({
       try{
         const res=await fetch('/api/agents/report',{
           method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({question:q,top_k:this.topk,backend:this.backend,region:this.selection}),
+          body:JSON.stringify({question:q,top_k:this.topk,backend:this.backend,domain:this.domain,region:this.selection,trace:true}),
         });
         const data=await res.json();
         const html=data.report?this._md(data.report):`<em>${data.error||'无报告'}</em>`;
         this.messages.push({role:'ai',html});this.reportHtml=html;
+        if(Array.isArray(data.trace))this.agentTrace=data.trace;
+        this.reportMeta=`领域：${data.domain||this.domain} · 修订：${data.revisions||0}${data.evaluation?.score!=null?` · 评测：${data.evaluation.score}`:''}`;
       }catch(e){this.messages.push({role:'ai',text:`❌ ${e.message}`});}
       finally{this.streaming=false;this.reportStatus='分析完成。';this._scrollChat();}
     },

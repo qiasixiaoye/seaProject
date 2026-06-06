@@ -28,6 +28,7 @@ def run(state: GeoAgentState) -> dict[str, Any]:
     bbox = state.get("bbox")
     domain = state.get("domain", "general")
     user_vars = state.get("variables", [])
+    planned_vars = state.get("planned_variables", [])
     trace = list(state.get("trace", []))
 
     if not bbox:
@@ -36,7 +37,7 @@ def run(state: GeoAgentState) -> dict[str, Any]:
 
     # 合并用户指定变量 + 领域默认变量
     vars_to_query = list(dict.fromkeys(
-        (user_vars or []) + DOMAIN_VARS.get(domain, DOMAIN_VARS["general"])
+        (user_vars or []) + (planned_vars or []) + DOMAIN_VARS.get(domain, DOMAIN_VARS["general"])
     ))[:7]
 
     try:

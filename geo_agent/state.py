@@ -52,11 +52,14 @@ class GeoAgentState(TypedDict, total=False):
     # ── 意图解析（IntentNode） ─────────────────────────────────
     domain: str                   # "marine" | "stargazing" | "biology" | "navigation" | "general"
     intent: dict[str, Any]        # topics / keywords / queries / intent_type
+    execution_plan: dict[str, Any]
+    planned_variables: list[str]
 
     # ── 检索层（RetrievalNode + ContextNode，可并行） ──────────
     candidates: list[dict[str, Any]]   # 候选文档（Doc 序列化为 dict）
     backend_used: str
     ocean_data: dict[str, Any]         # NetCDF 区域统计
+    data_context: dict[str, Any]       # DataAgent 数值质量摘要
 
     # ── 筛选层（ScreeningNode） ───────────────────────────────
     kept_docs: list[dict[str, Any]]
@@ -66,6 +69,7 @@ class GeoAgentState(TypedDict, total=False):
     # ── 领域推理（ReasoningNode） ─────────────────────────────
     domain_analysis: dict[str, Any]   # 各领域分析结果
     risk_hypotheses: list[dict[str, Any]]
+    visualization: dict[str, Any]     # VisualizationAgent 渲染建议
 
     # ── 报告生成（ReportNode） ────────────────────────────────
     report: str
@@ -73,6 +77,7 @@ class GeoAgentState(TypedDict, total=False):
 
     # ── 质量审查（CriticNode） ────────────────────────────────
     critic_result: dict[str, Any]   # passed / issues / feedback
+    evaluation: dict[str, Any]      # EvaluatorAgent 指标
 
     # ── 元信息 ────────────────────────────────────────────────
     task_id: str

@@ -17,6 +17,13 @@ NC_UPLOAD_DIR = DATA_DIR / "nc_uploads"
 LAND_MASK_NC = NC_UPLOAD_DIR / "etopo2022_taiwan_30s_bathy.nc"
 _LAND_MASK_CACHE: dict[str, Any] = {}
 
+# ── LRU-style 元数据缓存（避免大文件重复解析） ────────────────────────────────
+_DATASET_META_CACHE: dict[str, Any] = {}   # key: (path_str, mtime_ns) → summary
+_META_CACHE_MAX = 32
+
+_TIME_DIM_NAMES  = {"time", "t", "time_counter", "ocean_time", "Times"}
+_DEPTH_DIM_NAMES = {"depth", "lev", "level", "zlev", "altitude", "z", "depth_t", "deptht"}
+
 NC_DIMENSION = 10
 NC_VARIABLE = 11
 NC_ATTRIBUTE = 12
@@ -69,24 +76,50 @@ def ensure_sample_nc() -> Path:
     return SAMPLE_NC
 
 
+def _meta_cache_key(path: Path) -> tuple[str, int]:
+    """缓存 key = (路径字符串, 修改时间纳秒)，文件变化时自动失效。"""
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        mtime = 0
+    return (str(path), mtime)
+
+
+def _meta_cache_get(path: Path) -> dict[str, Any] | None:
+    return _DATASET_META_CACHE.get(_meta_cache_key(path))
+
+
+def _meta_cache_set(path: Path, summary: dict[str, Any]) -> None:
+    key = _meta_cache_key(path)
+    if len(_DATASET_META_CACHE) >= _META_CACHE_MAX:
+        # 简单 LRU：移除第一个（插入最早）
+        oldest = next(iter(_DATASET_META_CACHE))
+        del _DATASET_META_CACHE[oldest]
+    _DATASET_META_CACHE[key] = summary
+
+
 def dataset_summary() -> dict[str, Any]:
     ensure_sample_nc()
     datasets = []
     for path in _iter_nc_files():
+        cached = _meta_cache_get(path)
+        if cached is not None:
+            datasets.append(cached)
+            continue
         try:
-            datasets.append(_summary_netcdf4(path))
+            summary = _summary_netcdf4(path)
         except Exception as exc:
             try:
-                datasets.append(_summary_classic(path))
+                summary = _summary_classic(path)
             except Exception as classic_exc:
-                datasets.append(
-                    {
-                        "id": path.stem,
-                        "path": str(path),
-                        "error": f"{type(exc).__name__}: {exc}; fallback={type(classic_exc).__name__}: {classic_exc}",
-                        "variables": [],
-                    }
-                )
+                summary = {
+                    "id": path.stem,
+                    "path": str(path),
+                    "error": f"{type(exc).__name__}: {exc}; fallback={type(classic_exc).__name__}: {classic_exc}",
+                    "variables": [],
+                }
+        _meta_cache_set(path, summary)
+        datasets.append(summary)
     return {"datasets": datasets}
 
 
@@ -114,9 +147,14 @@ def query_grid(payload: dict[str, Any]) -> dict[str, Any]:
     north = float(bounds.get("north", 30))
     max_points = max(100, min(50000, int(payload.get("max_points", 9000))))
     requested_step = max(0, min(1000, int(payload.get("step") or payload.get("stride") or 0)))
+    time_index  = max(0, int(payload.get("time_index")  or 0))
+    depth_index = max(0, int(payload.get("depth_index") or 0))
 
     try:
-        result = _query_grid_netcdf4(path, variable, west, east, south, north, max_points, requested_step)
+        result = _query_grid_netcdf4(
+            path, variable, west, east, south, north,
+            max_points, requested_step, time_index, depth_index,
+        )
         result["render_time_ms"] = round((_time.monotonic() - _t0) * 1000, 1)
         return result
     except ImportError:
@@ -197,6 +235,11 @@ def query_grid(payload: dict[str, Any]) -> dict[str, Any]:
         "requested_step": requested_step,
         "auto_step": auto_step,
         "shape": {"lat": len(lat_idx), "lon": len(lon_idx)},
+        "time_index": time_index,
+        "depth_index": depth_index,
+        "selected_time": None,
+        "selected_depth": None,
+        "render_time_ms": round((_time.monotonic() - _t0) * 1000, 1),
         "stats": {
             "min": round(min(flat), 4),
             "max": round(max(flat), 4),
@@ -462,6 +505,15 @@ def _vector_pair_name(name: str, role: str, all_names: set[str]) -> str:
     return ""
 
 
+def _find_nc_dim(nc: Any, candidates: set[str]) -> str:
+    """在 nc.dimensions / nc.variables 中查找 time 或 depth 维度名。"""
+    lower_cands = {c.lower() for c in candidates}
+    for name in nc.dimensions:
+        if name.lower() in lower_cands:
+            return name
+    return ""
+
+
 def _summary_netcdf4(path: Path) -> dict[str, Any]:
     from netCDF4 import Dataset
 
@@ -475,10 +527,47 @@ def _summary_netcdf4(path: Path) -> dict[str, Any]:
         lat_dim = _coord_dim(nc.variables[lat_name], lat_name)
         lon_dim = _coord_dim(nc.variables[lon_name], lon_name)
         all_names = set(nc.variables.keys())
+
+        # ── 时间 / 深度维度检测 ────────────────────────────────────────────
+        time_dim  = _find_nc_dim(nc, _TIME_DIM_NAMES)
+        depth_dim = _find_nc_dim(nc, _DEPTH_DIM_NAMES)
+
+        time_info: dict[str, Any] = {}
+        if time_dim and time_dim in nc.variables:
+            t_var = nc.variables[time_dim]
+            t_units = _jsonable(getattr(t_var, "units", ""))
+            t_vals  = _to_float_list(t_var[:])
+            time_info = {
+                "time_dim": time_dim,
+                "time_count": len(t_vals),
+                "time_units": t_units,
+                "time_values": [round(x, 3) for x in t_vals[:200]],  # 最多 200 个值
+            }
+        elif time_dim:
+            time_info = {"time_dim": time_dim, "time_count": len(nc.dimensions[time_dim])}
+
+        depth_info: dict[str, Any] = {}
+        if depth_dim and depth_dim in nc.variables:
+            d_var  = nc.variables[depth_dim]
+            d_units = _jsonable(getattr(d_var, "units", ""))
+            d_vals  = _to_float_list(d_var[:])
+            depth_info = {
+                "depth_dim": depth_dim,
+                "depth_count": len(d_vals),
+                "depth_units": d_units,
+                "depth_values": [round(x, 3) for x in d_vals[:100]],
+            }
+        elif depth_dim:
+            depth_info = {"depth_dim": depth_dim, "depth_count": len(nc.dimensions[depth_dim])}
+
+        skip_lower = {lat_name.lower(), lon_name.lower()}
+        if time_dim:  skip_lower.add(time_dim.lower())
+        if depth_dim: skip_lower.add(depth_dim.lower())
+
         variables = []
         for name, var in nc.variables.items():
             lower = name.lower()
-            if lower in {lat_name.lower(), lon_name.lower(), "time", "depth", "altitude", "zlev"}:
+            if lower in skip_lower or lower in {"time", "depth", "altitude", "zlev"}:
                 continue
             dims = list(getattr(var, "dimensions", ()))
             if lat_dim not in dims or lon_dim not in dims:
@@ -511,6 +600,8 @@ def _summary_netcdf4(path: Path) -> dict[str, Any]:
             "resolution": {"lat": _coord_step(lat_values), "lon": _coord_step(lon_values)},
             "recommended_step": _recommended_step(len(lat_values), len(lon_values)),
             "variables": variables,
+            **time_info,
+            **depth_info,
         }
 
 
@@ -922,6 +1013,33 @@ def _align_vectors_to_mask(
     return u_grid, v_grid
 
 
+def _dim_index_for(
+    dim: str,
+    lat_dim: str,
+    lon_dim: str,
+    time_dim: str,
+    depth_dim: str,
+    lat_slice: Any,
+    lon_slice: Any,
+    time_index: int,
+    depth_index: int,
+    nc: Any,
+) -> tuple[Any, str]:
+    """返回 (selector, axis_label)；axis_label 为 '' 表示非空间维。"""
+    if dim == lat_dim:
+        return lat_slice, "lat"
+    if dim == lon_dim:
+        return lon_slice, "lon"
+    if time_dim and dim == time_dim:
+        t_len = len(nc.dimensions[dim])
+        return max(0, min(time_index, t_len - 1)), ""
+    if depth_dim and dim == depth_dim:
+        d_len = len(nc.dimensions[dim])
+        return max(0, min(depth_index, d_len - 1)), ""
+    # 其余未知维（如 nv 等）默认取第 0 层
+    return 0, ""
+
+
 def _query_grid_netcdf4(
     path: Path,
     variable: str,
@@ -931,6 +1049,8 @@ def _query_grid_netcdf4(
     north: float,
     max_points: int,
     requested_step: int,
+    time_index: int = 0,
+    depth_index: int = 0,
 ) -> dict[str, Any]:
     from netCDF4 import Dataset
 
@@ -944,8 +1064,10 @@ def _query_grid_netcdf4(
         var = nc.variables[variable]
         lat_values = _to_float_list(nc.variables[lat_name][:])
         lon_values = _to_float_list(nc.variables[lon_name][:])
-        lat_dim = _coord_dim(nc.variables[lat_name], lat_name)
-        lon_dim = _coord_dim(nc.variables[lon_name], lon_name)
+        lat_dim  = _coord_dim(nc.variables[lat_name], lat_name)
+        lon_dim  = _coord_dim(nc.variables[lon_name], lon_name)
+        time_dim  = _find_nc_dim(nc, _TIME_DIM_NAMES)
+        depth_dim = _find_nc_dim(nc, _DEPTH_DIM_NAMES)
         dims = list(var.dimensions)
         if lat_dim not in dims or lon_dim not in dims:
             raise ValueError(f"variable {variable} is not aligned to latitude/longitude dimensions")
@@ -967,19 +1089,37 @@ def _query_grid_netcdf4(
         selectors: list[Any] = []
         slice_axes: list[str] = []
         for dim in dims:
-            if dim == lat_dim:
-                selectors.append(lat_slice)
-                slice_axes.append("lat")
-            elif dim == lon_dim:
-                selectors.append(lon_slice)
-                slice_axes.append("lon")
-            else:
-                selectors.append(0)
+            sel, axis = _dim_index_for(
+                dim, lat_dim, lon_dim, time_dim, depth_dim,
+                lat_slice, lon_slice, time_index, depth_index, nc,
+            )
+            selectors.append(sel)
+            if axis:
+                slice_axes.append(axis)
+
         units = _jsonable(getattr(var, "units", ""))
         long_name = _jsonable(getattr(var, "long_name", variable))
         render_meta = _variable_render_meta(path.stem, variable, units, long_name, dims, set(nc.variables.keys()))
         lat_out = [float(x) for x in lat_out]
         lon_out = [float(x) for x in lon_out]
+
+        # 当前选中的 time / depth 值（用于前端显示）
+        selected_time_val: Any = None
+        selected_depth_val: Any = None
+        if time_dim and time_dim in nc.variables:
+            t_len = len(nc.dimensions[time_dim])
+            safe_ti = max(0, min(time_index, t_len - 1))
+            try:
+                selected_time_val = float(nc.variables[time_dim][safe_ti])
+            except Exception:
+                pass
+        if depth_dim and depth_dim in nc.variables:
+            d_len = len(nc.dimensions[depth_dim])
+            safe_di = max(0, min(depth_index, d_len - 1))
+            try:
+                selected_depth_val = float(nc.variables[depth_dim][safe_di])
+            except Exception:
+                pass
 
         pair_name = str(render_meta.get("vector_pair") or "")
         if pair_name and pair_name in nc.variables:
@@ -989,14 +1129,13 @@ def _query_grid_netcdf4(
                 pair_selectors: list[Any] = []
                 pair_axes: list[str] = []
                 for dim in pair_dims:
-                    if dim == lat_dim:
-                        pair_selectors.append(lat_slice)
-                        pair_axes.append("lat")
-                    elif dim == lon_dim:
-                        pair_selectors.append(lon_slice)
-                        pair_axes.append("lon")
-                    else:
-                        pair_selectors.append(0)
+                    sel, axis = _dim_index_for(
+                        dim, lat_dim, lon_dim, time_dim, depth_dim,
+                        lat_slice, lon_slice, time_index, depth_index, nc,
+                    )
+                    pair_selectors.append(sel)
+                    if axis:
+                        pair_axes.append(axis)
                 selected = _selected_grid_values(var, selectors, slice_axes)
                 paired = _selected_grid_values(pair_var, pair_selectors, pair_axes)
                 selected_fill = _nc_fill_values(var)
@@ -1072,6 +1211,10 @@ def _query_grid_netcdf4(
                     "requested_step": requested_step,
                     "auto_step": auto_step,
                     "shape": {"lat": len(lat_out), "lon": len(lon_out)},
+                    "time_index": time_index,
+                    "depth_index": depth_index,
+                    "selected_time": selected_time_val,
+                    "selected_depth": selected_depth_val,
                     "stats": {
                         "min": round(min(flat), 4),
                         "max": round(max(flat), 4),
@@ -1125,6 +1268,10 @@ def _query_grid_netcdf4(
             "requested_step": requested_step,
             "auto_step": auto_step,
             "shape": {"lat": len(lat_out), "lon": len(lon_out)},
+            "time_index": time_index,
+            "depth_index": depth_index,
+            "selected_time": selected_time_val,
+            "selected_depth": selected_depth_val,
             "stats": {
                 "min": round(min(flat), 4),
                 "max": round(max(flat), 4),

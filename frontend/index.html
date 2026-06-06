@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.3.1/ol.css">
   <link rel="stylesheet" href="/assets/app.css?v=20260531-v4">
   <style>
+    [v-cloak] { display: none !important; }
     /* Particle overlay canvas on top of Cesium globe */
     #particleCanvas {
       position: absolute;
@@ -29,6 +30,29 @@
         #313695, #4575b4, #74add1, #e0f3f8, #fee090, #fdae61, #d73027);
     }
     [v-cloak] { display: none !important; }
+    /* Time axis & depth selector */
+    .timeAxisBlock { margin-top:10px; padding:8px 0; border-top:1px solid var(--line,#2a3a4a); }
+    .timeAxisHeader { display:flex; align-items:center; gap:6px; margin-bottom:6px; font-size:12px; }
+    .timeLabel { color:var(--soft,#8ba0b2); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+    .timeVal { flex:1; color:var(--ink,#e0eaf5); font-variant-numeric:tabular-nums; }
+    .playBtn { width:28px; height:28px; border-radius:50%; font-size:13px; padding:0; line-height:28px; text-align:center; }
+    .playBtn.active { background:var(--accent,#0f6f9f); color:#fff; }
+    .timeSlider { width:100%; accent-color:var(--accent,#0f6f9f); cursor:pointer; }
+    .playSpeedRow { display:flex; align-items:center; gap:6px; margin-top:4px; font-size:12px; color:var(--soft,#8ba0b2); }
+    .depthBlock { margin-top:8px; font-size:12px; color:var(--soft,#8ba0b2); }
+    /* Knowledge management panel */
+    .kbHeader { display:flex; justify-content:space-between; align-items:center; }
+    .kbUploadRow { display:flex; align-items:center; gap:6px; margin:8px 0 4px; flex-wrap:wrap; }
+    .kbFileName { flex:1; font-size:11px; color:var(--soft,#8ba0b2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+    .kbActionRow { display:flex; gap:6px; margin:6px 0; }
+    .kbMsg { font-size:12px; margin:4px 0; padding:4px 6px; border-radius:4px; }
+    .kbOk { color:#4ade80; background:rgba(74,222,128,.1); }
+    .kbErr { color:#f87171; background:rgba(248,113,113,.1); }
+    .kbDocList { margin-top:8px; }
+    .kbSubTitle { font-size:11px; color:var(--soft,#8ba0b2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+    .kbDocItem { display:flex; align-items:center; gap:5px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.05); font-size:12px; }
+    .kbDocKind { background:rgba(15,111,159,.25); color:#7dd3fc; border-radius:3px; padding:1px 4px; font-size:10px; flex-shrink:0; }
+    .kbDocTitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink,#e0eaf5); }
   </style>
 </head>
 <body>
@@ -102,12 +126,52 @@
             <label>格点上限<input type="number" v-model.number="maxPoints" min="100" max="50000" step="100"></label>
           </div>
 
+
           <!-- Opacity slider -->
           <div class="opacityRow">
             <span>图层透明度</span>
             <input type="range" v-model.number="layerOpacity" min="0.1" max="1" step="0.05"
               style="flex:1" @input="updateLayerOpacity">
             <span>{{ Math.round(layerOpacity * 100) }}%</span>
+          </div>
+
+          <!-- ── Time axis ── -->
+          <div v-if="timeCount > 1" class="timeAxisBlock">
+            <div class="timeAxisHeader">
+              <span class="timeLabel">时间轴</span>
+              <span class="timeVal">{{ timeIndex + 1 }} / {{ timeCount }}
+                <template v-if="selectedTimeLabel"> — {{ selectedTimeLabel }}</template>
+              </span>
+              <button class="iconButton playBtn" :class="{ active: playing }"
+                @click="playing ? stopPlayback() : playTimelapse()" :title="playing ? '停止' : '播放动画'">
+                {{ playing ? '■' : '▶' }}
+              </button>
+            </div>
+            <input type="range" class="timeSlider"
+              :min="0" :max="timeCount - 1" step="1"
+              v-model.number="timeIndex"
+              @input="onTimeSliderChange" @change="onTimeSliderChange">
+            <div class="playSpeedRow">
+              <span>帧间隔</span>
+              <select v-model.number="playInterval" style="width:90px;font-size:12px">
+                <option :value="500">0.5 s</option>
+                <option :value="1000">1 s</option>
+                <option :value="2000">2 s</option>
+                <option :value="3000">3 s</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- ── Depth selector ── -->
+          <div v-if="depthCount > 1" class="depthBlock">
+            <label>深度层
+              <select v-model.number="depthIndex" @change="onDepthChange" style="width:100%;margin-top:4px">
+                <option v-for="(dv, i) in depthValues" :key="i" :value="i">
+                  {{ i }}: {{ typeof dv === 'number' ? dv.toFixed(1) : dv }} {{ depthUnits }}
+                </option>
+                <option v-if="!depthValues.length" v-for="i in depthCount" :key="i-1" :value="i-1">层 {{ i }}</option>
+              </select>
+            </label>
           </div>
         </section>
 
@@ -126,6 +190,55 @@
               <div class="statItem"><span>格点</span><b>{{ stats.count }}</b></div>
             </template>
             <span v-else style="color:var(--soft);font-size:12px">框选并渲染后显示</span>
+          </div>
+        </section>
+          <!-- 知识库管理面板 -->
+        <section class="deckBlock knowledgePanel">
+          <div class="sectionTitle kbHeader" @click="knowledgeOpen = !knowledgeOpen" style="cursor:pointer;user-select:none">
+            <span>知识库管理</span>
+            <span style="float:right;font-size:11px;color:var(--soft)">
+              {{ knowledgeDocs.local_count + knowledgeDocs.ragflow_count }} 篇
+              {{ knowledgeOpen ? '▲' : '▼' }}
+            </span>
+          </div>
+          <div v-show="knowledgeOpen">
+            <div class="kbUploadRow">
+              <label class="kbFileLabel" title="支持 PDF / Markdown / TXT / JSON">
+                <input type="file" accept=".pdf,.md,.txt,.json" @change="onKbFileChange" style="display:none">
+                <span class="toolButton secondary" style="font-size:12px;padding:4px 8px">选择文件</span>
+              </label>
+              <span class="kbFileName">{{ kbFileName || '未选择' }}</span>
+              <button class="toolButton primary" style="font-size:12px;padding:4px 10px"
+                :disabled="!kbFile || kbUploading" @click="uploadKbDoc">
+                {{ kbUploading ? '上传中…' : '上传' }}
+              </button>
+            </div>
+            <p v-if="kbUploadMsg" class="kbMsg" :class="kbUploadOk ? 'kbOk' : 'kbErr'">{{ kbUploadMsg }}</p>
+            <div class="kbActionRow">
+              <button class="toolButton secondary" style="font-size:12px" @click="syncKbLocal">重新扫描本地</button>
+              <button class="toolButton secondary" style="font-size:12px" @click="loadKbDocs">刷新列表</button>
+            </div>
+            <div class="kbDocList" v-if="knowledgeDocs.local_docs && knowledgeDocs.local_docs.length">
+              <div class="kbSubTitle">本地文档 ({{ knowledgeDocs.local_count }})</div>
+              <div v-for="doc in knowledgeDocs.local_docs.slice(0,8)" :key="doc.id" class="kbDocItem">
+                <span class="kbDocKind">{{ doc.kind }}</span>
+                <span class="kbDocTitle" :title="doc.title">{{ doc.title }}</span>
+              </div>
+              <span v-if="knowledgeDocs.local_count > 8" style="font-size:11px;color:var(--soft)">
+                …还有 {{ knowledgeDocs.local_count - 8 }} 篇
+              </span>
+            </div>
+            <div class="kbDocList" v-if="knowledgeDocs.ragflow_docs && knowledgeDocs.ragflow_docs.length">
+              <div class="kbSubTitle">RAGFlow 文档 ({{ knowledgeDocs.ragflow_count }})</div>
+              <div v-for="doc in knowledgeDocs.ragflow_docs.slice(0,6)" :key="doc.id" class="kbDocItem">
+                <span class="kbDocKind">rf</span>
+                <span class="kbDocTitle" :title="doc.name">{{ doc.name }}</span>
+              </div>
+            </div>
+            <div v-if="!knowledgeDocs.local_docs?.length && !knowledgeDocs.ragflow_docs?.length"
+              style="font-size:12px;color:var(--soft);padding:4px 0">
+              暂无文档，点击「重新扫描本地」加载。
+            </div>
           </div>
         </section>
       </aside>
