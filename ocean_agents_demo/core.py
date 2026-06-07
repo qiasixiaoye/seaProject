@@ -56,6 +56,7 @@ def enrich_evidence_metadata(
         meta = dict(doc.metadata or {})
         pages = _metadata_pages(meta)
         content_type = str(meta.get("content_type") or _infer_content_type(doc))
+        effective_route = str(meta.get("route") or route)
         evidence = {
             "schema_version": EVIDENCE_SCHEMA_VERSION,
             "doc_id": str(meta.get("doc_id") or meta.get("document_id") or doc.id),
@@ -73,7 +74,10 @@ def enrich_evidence_metadata(
             "content_type": content_type,
             "year": doc.year or None,
             "backend": doc.backend,
-            "route": route,
+            "route": effective_route,
+            "retrieval_query": str(meta.get("retrieval_query") or ""),
+            "query_variant": str(meta.get("query_variant") or ""),
+            "routes": meta.get("routes") or [],
             "rank_before": int(meta.get("rank_before") or rank),
             "rank_after": int(meta.get("rank_after") or rank),
             "similarity": _as_float(meta.get("similarity", doc.score), default=doc.score),
@@ -101,7 +105,7 @@ def doc_to_evidence_dict(doc: Doc) -> dict[str, Any]:
         "doc_id", "chunk_id", "dataset_id", "document_name", "page", "pages",
         "section", "section_path", "content_type", "rank_before", "rank_after",
         "rerank_score", "rerank_reason", "similarity", "vector_similarity",
-        "term_similarity",
+        "term_similarity", "retrieval_query", "query_variant", "routes",
     ):
         data[key] = evidence.get(key)
     return data
@@ -549,16 +553,204 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+DOMAIN_QUERY_ALIASES: tuple[tuple[str, ...], ...] = (
+    ("sst", "sea surface temperature", "surface temperature", "\u6d77\u8868\u6e29\u5ea6", "\u6d77\u6e29"),
+    ("sss", "sea surface salinity", "salinity", "\u76d0\u5ea6", "\u6d77\u8868\u76d0\u5ea6"),
+    ("chlorophyll", "chlorophyll-a", "chl-a", "chla", "\u53f6\u7eff\u7d20"),
+    ("swh", "significant wave height", "wave height", "wave", "\u6709\u6548\u6ce2\u9ad8", "\u6d77\u6d6a"),
+    ("marine heatwave", "mhw", "\u6d77\u6d0b\u70ed\u6d6a"),
+    ("coral bleaching", "coral reef", "\u73ca\u745a\u767d\u5316", "\u73ca\u745a\u7901"),
+    ("fishery", "fisheries", "fishing", "\u6e14\u4e1a", "\u6e14\u573a"),
+    ("sea level", "sea-level rise", "sla", "\u6d77\u5e73\u9762", "\u6d77\u5e73\u9762\u4e0a\u5347"),
+    ("ocean acidification", "acidification", "ph", "\u6d77\u6d0b\u9178\u5316", "\u9178\u5316"),
+    ("carbon", "bgc", "biogeochemical", "carbon cycle", "\u78b3\u5faa\u73af", "\u751f\u7269\u5730\u7403\u5316\u5b66"),
+    ("enso", "el nino", "la nina", "\u5384\u5c14\u5c3c\u8bfa", "\u62c9\u5c3c\u5a1c"),
+    ("upwelling", "coastal upwelling", "\u4e0a\u5347\u6d41", "\u8fd1\u5cb8\u4e0a\u5347\u6d41"),
+)
+
+
+def expand_retrieval_queries(intent: dict[str, Any], max_queries: int = 4) -> list[dict[str, Any]]:
+    """Create deterministic domain query variants for bilingual ocean retrieval."""
+    raw_queries = _as_text_list(intent.get("queries"))
+    base_query = str(intent.get("retrieval_query") or "").strip()
+    if base_query:
+        raw_queries.insert(0, base_query)
+    original_question = str(intent.get("original_question") or "").strip()
+    if original_question:
+        raw_queries.append(original_question)
+
+    variants: list[dict[str, Any]] = []
+    for query in raw_queries:
+        _add_query_variant(variants, query, "original", [])
+
+    context = " ".join(
+        raw_queries
+        + _as_text_list(intent.get("keywords"))
+        + _as_text_list(intent.get("topics"))
+    )
+    matched_aliases = _matched_domain_aliases(context)
+    if matched_aliases:
+        alias_terms = list(dict.fromkeys(term for group in matched_aliases for term in group))
+        _add_query_variant(
+            variants,
+            " ".join([base_query or original_question, *alias_terms[:8]]),
+            "domain_aliases",
+            alias_terms[:8],
+        )
+        english_terms = [term for term in alias_terms if term.isascii()]
+        if english_terms:
+            _add_query_variant(variants, " ".join(english_terms[:10]), "english_aliases", english_terms[:10])
+        non_ascii_terms = [term for term in alias_terms if not term.isascii()]
+        if non_ascii_terms:
+            _add_query_variant(variants, " ".join(non_ascii_terms[:10]), "chinese_aliases", non_ascii_terms[:10])
+    else:
+        keyword_query = " ".join(_as_text_list(intent.get("keywords"))[:8])
+        if keyword_query:
+            _add_query_variant(variants, keyword_query, "keywords", [])
+
+    return variants[:max(1, max_queries)]
+
+
+def _as_text_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if value:
+        return [str(value).strip()]
+    return []
+
+
+def _add_query_variant(
+    variants: list[dict[str, Any]],
+    query: str,
+    source: str,
+    aliases: list[str],
+) -> None:
+    query = re.sub(r"\s+", " ", str(query or "")).strip()
+    if not query:
+        return
+    key = query.lower()
+    if any(item["query"].lower() == key for item in variants):
+        return
+    variants.append({"query": query[:500], "source": source, "aliases": aliases})
+
+
+def _matched_domain_aliases(text: str) -> list[tuple[str, ...]]:
+    lower = str(text or "").lower()
+    tokens = tokenize(lower)
+    matched: list[tuple[str, ...]] = []
+    for group in DOMAIN_QUERY_ALIASES:
+        for alias in group:
+            alias_lower = alias.lower()
+            alias_tokens = tokenize(alias_lower)
+            if alias_lower in lower or (alias_tokens and alias_tokens <= tokens):
+                matched.append(group)
+                break
+    return matched
+
+
 def retrieve(intent: dict[str, Any], top_k: int, backend: str) -> tuple[list[Doc], str]:
+    docs, used, _info = retrieve_with_info(intent, top_k, backend)
+    return docs, used
+
+
+def retrieve_with_info(intent: dict[str, Any], top_k: int, backend: str) -> tuple[list[Doc], str, dict[str, Any]]:
     recall_k = max(top_k, min(30, top_k * 3))
+    variants = expand_retrieval_queries(intent)
+    merged: dict[str, Doc] = {}
+    routes: list[dict[str, Any]] = []
+    backend_used = "local"
+
+    def add_docs(docs: list[Doc], used: str, variant: dict[str, Any], route: str) -> None:
+        for rank, doc in enumerate(docs, 1):
+            meta = dict(doc.metadata or {})
+            route_hit = {
+                "query": variant["query"],
+                "query_variant": variant["source"],
+                "route": route,
+                "backend": used,
+                "rank": rank,
+                "score": round(float(doc.score or 0.0), 4),
+            }
+            meta["retrieval_query"] = variant["query"]
+            meta["query_variant"] = variant["source"]
+            meta["route"] = route
+            meta["routes"] = [*list(meta.get("routes") or []), route_hit]
+            doc.metadata = meta
+            key = doc.id or doc.title
+            if key not in merged:
+                merged[key] = doc
+                continue
+            existing = merged[key]
+            existing_meta = dict(existing.metadata or {})
+            combined_routes = [*list(existing_meta.get("routes") or []), route_hit]
+            if doc.score > existing.score:
+                meta["routes"] = combined_routes
+                doc.metadata = meta
+                merged[key] = doc
+            else:
+                existing_meta["routes"] = combined_routes
+                existing.metadata = existing_meta
+
     if backend in {"auto", "ragflow"}:
         try:
-            docs = ragflow_retrieve(intent["retrieval_query"], recall_k)
-            return rerank_evidence_docs(intent, docs, top_k), "ragflow"
-        except Exception:
+            backend_used = "ragflow"
+            for variant in variants:
+                docs = ragflow_retrieve(variant["query"], recall_k)
+                routes.append({
+                    "query": variant["query"],
+                    "query_variant": variant["source"],
+                    "route": "ragflow_vector",
+                    "backend": "ragflow",
+                    "count": len(docs),
+                })
+                add_docs(docs, "ragflow", variant, "ragflow_vector")
+        except Exception as exc:
+            routes.append({
+                "query": variants[0]["query"] if variants else str(intent.get("retrieval_query") or ""),
+                "route": "ragflow_vector",
+                "backend": "ragflow",
+                "count": 0,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
             if backend == "ragflow":
                 raise
-    return rerank_evidence_docs(intent, local_retrieve(intent["retrieval_query"], recall_k), top_k), "local"
+
+    if not merged:
+        for variant in variants:
+            try:
+                docs = local_retrieve(variant["query"], recall_k)
+                routes.append({
+                    "query": variant["query"],
+                    "query_variant": variant["source"],
+                    "route": "local_keyword",
+                    "backend": "local",
+                    "count": len(docs),
+                })
+                add_docs(docs, "local", variant, "local_keyword")
+            except Exception as exc:
+                routes.append({
+                    "query": variant["query"],
+                    "query_variant": variant["source"],
+                    "route": "local_keyword",
+                    "backend": "local",
+                    "count": 0,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+        backend_used = "local"
+
+    candidates = list(merged.values())
+    reranked = rerank_evidence_docs(intent, candidates, top_k)
+    info = {
+        "queries": [variant["query"] for variant in variants],
+        "query_variants": variants,
+        "routes": routes,
+        "fusion": {
+            "method": "best_score_then_heuristic_rerank",
+            "input_count": len(candidates),
+            "output_count": len(reranked),
+        },
+    }
+    return reranked, backend_used, info
 
 
 def rerank_evidence_docs(intent: dict[str, Any], docs: list[Doc], top_k: int) -> list[Doc]:

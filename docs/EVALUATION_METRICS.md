@@ -204,6 +204,18 @@ but new consumers should prefer the normalized block:
   "year": 2024,
   "backend": "ragflow",
   "route": "ragflow_vector",
+  "retrieval_query": "coral bleaching SST",
+  "query_variant": "domain_aliases",
+  "routes": [
+    {
+      "query": "coral bleaching SST",
+      "query_variant": "domain_aliases",
+      "route": "ragflow_vector",
+      "backend": "ragflow",
+      "rank": 2,
+      "score": 0.82
+    }
+  ],
   "rank_before": 1,
   "rank_after": 1,
   "similarity": 0.82,
@@ -224,6 +236,8 @@ Required fields for retrieval evaluation:
 | `section` / `section_path` | Chunk boundary and answer support analysis. |
 | `content_type` | Distinguish paragraph, table, figure caption, metadata, etc. |
 | `route` | Show whether evidence came from local keyword, RAGFlow vector, hybrid, or rerank path. |
+| `retrieval_query` / `query_variant` | Explain which expanded query produced the selected chunk. |
+| `routes` | Preserve all route hits for duplicated chunks before fusion. |
 | `rank_before` / `rank_after` | Required for reranker evaluation. |
 | `similarity` / `rerank_score` | Required for ranking and threshold analysis. |
 

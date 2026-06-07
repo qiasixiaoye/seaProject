@@ -42,9 +42,12 @@ def run(state: GeoAgentState) -> dict[str, Any]:
             log.warning("RetrievalNode tool loop failed: %s", exc)
 
     # 多 query 融合降级
-    docs, used = _deterministic_retrieve(intent, top_k, backend)
+    docs, used, info = _deterministic_retrieve(intent, top_k, backend)
     trace.append({"node": "RetrievalNode", "mode": "multi-query",
-                  "count": len(docs), "backend": used})
+                  "count": len(docs), "backend": used,
+                  "queries": info.get("queries", []),
+                  "routes": info.get("routes", []),
+                  "fusion": info.get("fusion", {})})
     return {
         "candidates": [_doc_to_dict(d) for d in docs],
         "backend_used": used,
@@ -151,24 +154,16 @@ def _deterministic_retrieve(
     intent: dict[str, Any],
     top_k: int,
     backend: str,
-) -> tuple[list[Any], str]:
+) -> tuple[list[Any], str, dict[str, Any]]:
     from ocean_agents_demo import core
 
-    queries = intent.get("queries") or [intent.get("retrieval_query", "")]
-    merged: dict[str, Any] = {}
-    used = "local"
-    for query in queries:
-        sub = dict(intent, retrieval_query=query)
-        try:
-            docs, used = core.retrieve(sub, top_k, backend)
-            for d in docs:
-                key = d.id or d.title
-                if key not in merged or d.score > merged[key].score:
-                    merged[key] = d
-        except Exception as exc:
-            log.warning("deterministic retrieve query=%s failed: %s", query, exc)
-    candidates = sorted(merged.values(), key=lambda d: d.score, reverse=True)[:top_k]
-    return candidates, used
+    try:
+        docs, used, info = core.retrieve_with_info(intent, top_k, backend)
+        return docs, used, info
+    except Exception as exc:
+        query = intent.get("retrieval_query", "")
+        log.warning("deterministic retrieve query=%s failed: %s", query, exc)
+        return [], "local", {"queries": [query], "routes": [], "fusion": {"method": "failed"}}
 
 
 def _doc_to_dict(doc: Any) -> dict[str, Any]:
