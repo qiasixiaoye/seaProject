@@ -60,6 +60,7 @@ def _trace_output_summary(item: dict[str, Any]) -> dict[str, Any]:
         "domain", "backend", "count", "queries", "vars_queried", "vars_ok",
         "vars_missing", "kept", "passed", "layers", "warnings", "score",
         "grade", "passed", "revisions", "chars", "quality_flags",
+        "intent_type", "entities", "hazards", "variables", "query_variants",
     )
     return {key: item[key] for key in keys if key in item}
 

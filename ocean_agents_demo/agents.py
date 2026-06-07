@@ -108,22 +108,25 @@ class IntentAgent(Agent):
         queries = _as_str_list(data.get("queries"))
         if not queries:
             queries = [" ".join(keywords + [question]).strip() or question]
-        return {
-            "original_question": question,
-            "refined_question": question[:90],
-            "intent": str(data.get("intent") or "overview"),
-            "topics": topics,
-            "keywords": keywords,
-            "queries": queries,
-            "retrieval_query": " ".join(dict.fromkeys(keywords + [queries[0]])).strip() or question,
-            "mode": "llm",
-        }
+        intent = core.condense_intent(question)
+        intent["intent"] = str(data.get("intent") or intent.get("intent") or "overview")
+        intent["intent_type"] = intent["intent"]
+        if topics:
+            intent["topics"] = topics
+        if keywords:
+            intent["keywords"] = keywords
+        if queries:
+            intent["queries"] = list(dict.fromkeys(queries + _as_str_list(intent.get("queries"))))
+            intent["retrieval_query"] = " ".join(dict.fromkeys(keywords + [queries[0]])).strip() or intent["queries"][0]
+        intent["mode"] = "llm"
+        return intent
 
     def _heuristic_intent(self, question: str) -> dict[str, Any]:
         intent = core.condense_intent(question)
         intent.setdefault("topics", intent["keywords"])
-        intent["queries"] = [intent["retrieval_query"]]
-        intent["intent"] = "overview"
+        intent.setdefault("queries", [intent["retrieval_query"]])
+        intent.setdefault("intent", intent.get("intent_type", "overview"))
+        intent.setdefault("intent_type", intent["intent"])
         intent["mode"] = "heuristic"
         return intent
 
@@ -557,7 +560,13 @@ class Orchestrator(Agent):
             "task_id": task_id,
             "question": question,
             "report": state.report,
-            "intent": {k: state.intent.get(k) for k in ("intent", "topics", "keywords", "queries", "mode")},
+            "intent": {
+                k: state.intent.get(k) for k in (
+                    "schema_version", "intent", "intent_type", "topics", "keywords",
+                    "entities", "hazards", "variables", "queries", "query_variants",
+                    "retrieval_query", "mode",
+                )
+            },
             "backend": state.backend_used,
             "ocean_context": state.ocean_context,
             "risk_hypotheses": state.risk_hypotheses,

@@ -12,6 +12,7 @@ from typing import Any
 
 from geo_agent import llm
 from geo_agent.state import GeoAgentState
+from ocean_agents_demo import core
 
 log = logging.getLogger("geo_agent.nodes.intent")
 
@@ -65,14 +66,32 @@ def run(state: GeoAgentState) -> dict[str, Any]:
                 intent["domain"] = domain
             else:
                 domain = intent.get("domain", domain)  # LLM 可能修正领域
-            trace.append({"node": "IntentNode", "mode": "llm", "domain": domain})
+            trace.append({
+                "node": "IntentNode",
+                "mode": "llm",
+                "domain": domain,
+                "intent_type": intent.get("intent_type"),
+                "entities": intent.get("entities", []),
+                "hazards": intent.get("hazards", []),
+                "variables": intent.get("variables", []),
+                "query_variants": len(intent.get("query_variants") or []),
+            })
             return {"intent": intent, "domain": domain, "trace": trace}
         except Exception as exc:
             log.warning("IntentNode LLM failed, using heuristic: %s", exc)
 
     # 降级
     intent = _heuristic_intent(question, domain)
-    trace.append({"node": "IntentNode", "mode": "heuristic", "domain": domain})
+    trace.append({
+        "node": "IntentNode",
+        "mode": "heuristic",
+        "domain": domain,
+        "intent_type": intent.get("intent_type"),
+        "entities": intent.get("entities", []),
+        "hazards": intent.get("hazards", []),
+        "variables": intent.get("variables", []),
+        "query_variants": len(intent.get("query_variants") or []),
+    })
     return {"intent": intent, "domain": domain, "trace": trace}
 
 
@@ -107,25 +126,28 @@ def _llm_intent(question: str, pre_domain: str) -> dict[str, Any]:
     if not queries:
         queries = [question]
 
-    return {
-        "original_question": question,
-        "domain": str(data.get("domain", pre_domain)),
-        "intent_type": str(data.get("intent_type", "general")),
-        "topics": topics,
-        "keywords": keywords,
-        "queries": queries,
-        "retrieval_query": " ".join(dict.fromkeys(keywords + queries[:1])).strip() or question,
-        "location_hint": str(data.get("location_hint", "")),
-        "mode": "llm",
-    }
+    intent = core.condense_intent(question)
+    intent["domain"] = str(data.get("domain", pre_domain))
+    intent["intent_type"] = str(data.get("intent_type") or intent.get("intent_type") or "general")
+    intent["intent"] = intent["intent_type"]
+    if topics:
+        intent["topics"] = topics
+    if keywords:
+        intent["keywords"] = keywords
+    if queries:
+        intent["queries"] = list(dict.fromkeys(queries + _as_str_list(intent.get("queries"))))
+        intent["retrieval_query"] = " ".join(dict.fromkeys(keywords + queries[:1])).strip() or intent["queries"][0]
+    intent["location_hint"] = str(data.get("location_hint", ""))
+    intent["mode"] = "llm"
+    return intent
 
 
 def _heuristic_intent(question: str, domain: str) -> dict[str, Any]:
-    from ocean_agents_demo.core import condense_intent
-    base = condense_intent(question)
+    base = core.condense_intent(question)
     base["domain"] = domain
-    base["intent_type"] = "general"
-    base["queries"] = [base["retrieval_query"]]
+    base.setdefault("intent_type", "general")
+    base.setdefault("intent", base["intent_type"])
+    base.setdefault("queries", [base["retrieval_query"]])
     base["mode"] = "heuristic"
     return base
 

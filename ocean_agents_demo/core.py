@@ -23,6 +23,35 @@ KNOWLEDGE_DOCS_DIR = DATA_DIR / "knowledge_docs"
 PDF_REPORTS_DIR = DATA_DIR / "pdf_reports"
 TOKEN_RE = re.compile(r"[A-Za-z0-9_+-]+|[\u4e00-\u9fff]+")
 MARINE_TERMS = ["海洋酸化", "酸化", "贝类", "养殖", "海洋热浪", "热浪", "珊瑚", "渔业", "海平面", "监测", "治理", "规划", "风险"]
+INTENT_SCHEMA_VERSION = "intent.v2"
+ENTITY_ALIASES: dict[str, tuple[str, ...]] = {
+    "coral_reef": ("coral reef", "coral", "bleaching", "珊瑚", "珊瑚礁", "白化"),
+    "fishery": ("fishery", "fisheries", "fishing", "渔业", "渔场", "渔获"),
+    "shellfish": ("shellfish", "oyster", "clam", "mussel", "贝类", "牡蛎", "贝类养殖"),
+    "coastal_waters": ("coastal water", "coastal waters", "近岸海域", "近海", "沿海"),
+    "ecosystem_services": ("ecosystem service", "ecosystem services", "生态系统服务"),
+    "biodiversity": ("biodiversity", "生物多样性"),
+    "aquaculture": ("aquaculture", "养殖", "海水养殖"),
+    "navigation": ("navigation", "vessel", "ship", "航行", "船舶", "航运"),
+}
+HAZARD_ALIASES: dict[str, tuple[str, ...]] = {
+    "marine_heatwave": ("marine heatwave", "mhw", "heatwave", "海洋热浪", "热浪"),
+    "ocean_acidification": ("ocean acidification", "acidification", "海洋酸化", "酸化"),
+    "sea_level_rise": ("sea level rise", "sea-level rise", "sea level", "海平面上升", "海平面"),
+    "storm_surge": ("storm surge", "风暴潮"),
+    "strong_wave": ("strong wave", "significant wave height", "swell", "强浪", "有效波高", "涌浪"),
+    "eutrophication": ("eutrophication", "algal bloom", "harmful algal bloom", "富营养化", "赤潮", "藻华"),
+    "climate_change": ("climate change", "global warming", "气候变化", "全球变暖"),
+}
+VARIABLE_ALIASES: dict[str, tuple[str, ...]] = {
+    "sst": ("sst", "sea surface temperature", "surface temperature", "海表温度", "海温", "水温"),
+    "salinity": ("sss", "sea surface salinity", "salinity", "盐度", "海表盐度"),
+    "chlorophyll": ("chlorophyll", "chlorophyll-a", "chl-a", "chla", "叶绿素"),
+    "wave_height": ("wave height", "significant wave height", "swh", "浪高", "有效波高"),
+    "current": ("current", "ocean current", "海流", "洋流"),
+    "sea_level": ("sea level", "sla", "sea level anomaly", "海平面", "海面高"),
+    "carbon": ("carbon", "bgc", "biogeochemical", "碳", "生物地球化学"),
+}
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 
@@ -185,15 +214,119 @@ def tokenize(text: str) -> set[str]:
 
 
 def condense_intent(question: str) -> dict[str, Any]:
+    question = str(question or "").strip()
+    entities = _extract_alias_matches(question, ENTITY_ALIASES)
+    hazards = _extract_alias_matches(question, HAZARD_ALIASES)
+    variables = _extract_alias_matches(question, VARIABLE_ALIASES)
+    topics = _intent_topics(entities, hazards, variables)
     keywords = [term for term in MARINE_TERMS if term in question]
+    keywords.extend(_alias_terms(entities, ENTITY_ALIASES, preferred="chinese")[:4])
+    keywords.extend(_alias_terms(hazards, HAZARD_ALIASES, preferred="chinese")[:4])
+    keywords.extend(_alias_terms(variables, VARIABLE_ALIASES, preferred="chinese")[:4])
+    keywords = list(dict.fromkeys(term for term in keywords if term))
     if not keywords:
         keywords = sorted(tokenize(question), key=len, reverse=True)[:8]
+    query_variants = _build_intent_query_variants(question, keywords, entities, hazards, variables)
+    retrieval_query = query_variants[0]["query"] if query_variants else " ".join(dict.fromkeys(keywords + [question]))
+    intent_type = _infer_intent_type(question, hazards, variables)
     return {
+        "schema_version": INTENT_SCHEMA_VERSION,
         "original_question": question,
         "refined_question": question[:90],
-        "retrieval_query": " ".join(dict.fromkeys(keywords + [question])),
+        "intent_type": intent_type,
+        "intent": intent_type,
+        "topics": topics or keywords[:6],
+        "entities": entities,
+        "hazards": hazards,
+        "variables": variables,
+        "retrieval_query": retrieval_query,
+        "queries": [item["query"] for item in query_variants],
+        "query_variants": query_variants,
         "keywords": keywords,
     }
+
+
+def _extract_alias_matches(text: str, catalog: dict[str, tuple[str, ...]]) -> list[str]:
+    lower = str(text or "").lower()
+    tokens = tokenize(lower)
+    matched: list[str] = []
+    for key, aliases in catalog.items():
+        for alias in aliases:
+            alias_lower = alias.lower()
+            alias_tokens = tokenize(alias_lower)
+            if alias_lower in lower or (alias_tokens and alias_tokens <= tokens):
+                matched.append(key)
+                break
+    return matched
+
+
+def _alias_terms(keys: list[str], catalog: dict[str, tuple[str, ...]], preferred: str = "any") -> list[str]:
+    terms: list[str] = []
+    for key in keys:
+        for alias in catalog.get(key, ()):
+            is_ascii = alias.isascii()
+            if preferred == "english" and not is_ascii:
+                continue
+            if preferred == "chinese" and is_ascii:
+                continue
+            terms.append(alias)
+    if preferred != "any" and not terms:
+        return _alias_terms(keys, catalog, preferred="any")
+    return list(dict.fromkeys(terms))
+
+
+def _intent_topics(entities: list[str], hazards: list[str], variables: list[str]) -> list[str]:
+    topics: list[str] = []
+    topics.extend(_alias_terms(hazards, HAZARD_ALIASES, preferred="chinese")[:3])
+    topics.extend(_alias_terms(entities, ENTITY_ALIASES, preferred="chinese")[:3])
+    topics.extend(_alias_terms(variables, VARIABLE_ALIASES, preferred="chinese")[:3])
+    return list(dict.fromkeys(topics))
+
+
+def _infer_intent_type(question: str, hazards: list[str], variables: list[str]) -> str:
+    lower = question.lower()
+    if hazards and any(term in lower for term in ("risk", "impact", "影响", "风险", "危害", "后果")):
+        return "risk_assessment"
+    if any(term in lower for term in ("monitor", "监测", "观测", "指标", "数据")) or variables:
+        return "observation"
+    if any(term in lower for term in ("规划", "治理", "管理", "方案", "应对", "mitigation", "plan")):
+        return "planning"
+    if any(term in lower for term in ("compare", "对比", "比较")):
+        return "comparison"
+    return "overview"
+
+
+def _build_intent_query_variants(
+    question: str,
+    keywords: list[str],
+    entities: list[str],
+    hazards: list[str],
+    variables: list[str],
+) -> list[dict[str, Any]]:
+    variants: list[dict[str, Any]] = []
+    _add_query_variant(variants, " ".join(dict.fromkeys(keywords + [question])), "intent_keywords", keywords)
+    english_terms = (
+        _alias_terms(hazards, HAZARD_ALIASES, preferred="english")[:4]
+        + _alias_terms(entities, ENTITY_ALIASES, preferred="english")[:4]
+        + _alias_terms(variables, VARIABLE_ALIASES, preferred="english")[:4]
+    )
+    if english_terms:
+        _add_query_variant(variants, " ".join(dict.fromkeys(english_terms)), "intent_english_aliases", english_terms)
+    chinese_terms = (
+        _alias_terms(hazards, HAZARD_ALIASES, preferred="chinese")[:4]
+        + _alias_terms(entities, ENTITY_ALIASES, preferred="chinese")[:4]
+        + _alias_terms(variables, VARIABLE_ALIASES, preferred="chinese")[:4]
+    )
+    if chinese_terms:
+        _add_query_variant(variants, " ".join(dict.fromkeys(chinese_terms + [question])), "intent_chinese_aliases", chinese_terms)
+    if hazards and entities:
+        cross_terms = (
+            _alias_terms(hazards, HAZARD_ALIASES, preferred="english")[:2]
+            + _alias_terms(entities, ENTITY_ALIASES, preferred="english")[:2]
+            + ["impact", "assessment"]
+        )
+        _add_query_variant(variants, " ".join(dict.fromkeys(cross_terms)), "intent_risk_cross", cross_terms)
+    return variants
 
 
 def load_docs() -> list[Doc]:
@@ -1003,6 +1136,18 @@ DOMAIN_QUERY_ALIASES: tuple[tuple[str, ...], ...] = (
 
 def expand_retrieval_queries(intent: dict[str, Any], max_queries: int = 4) -> list[dict[str, Any]]:
     """Create deterministic domain query variants for bilingual ocean retrieval."""
+    variants: list[dict[str, Any]] = []
+    for item in intent.get("query_variants") or []:
+        if isinstance(item, dict):
+            _add_query_variant(
+                variants,
+                str(item.get("query") or ""),
+                str(item.get("source") or item.get("route") or "intent_variant"),
+                _as_text_list(item.get("aliases")),
+            )
+        else:
+            _add_query_variant(variants, str(item), "intent_variant", [])
+
     raw_queries = _as_text_list(intent.get("queries"))
     base_query = str(intent.get("retrieval_query") or "").strip()
     if base_query:
@@ -1011,7 +1156,6 @@ def expand_retrieval_queries(intent: dict[str, Any], max_queries: int = 4) -> li
     if original_question:
         raw_queries.append(original_question)
 
-    variants: list[dict[str, Any]] = []
     for query in raw_queries:
         _add_query_variant(variants, query, "original", [])
 
@@ -1063,7 +1207,7 @@ def _add_query_variant(
     key = query.lower()
     if any(item["query"].lower() == key for item in variants):
         return
-    variants.append({"query": query[:500], "source": source, "aliases": aliases})
+    variants.append({"query": query[:500], "source": source, "route": source, "aliases": aliases})
 
 
 def _matched_domain_aliases(text: str) -> list[tuple[str, ...]]:
