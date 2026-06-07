@@ -42,7 +42,22 @@ class Doc:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ChunkProfile:
+    name: str
+    unit: str
+    max_size: int
+    overlap: int
+    min_size: int
+
+
 EVIDENCE_SCHEMA_VERSION = "evidence_chunk.v1"
+DEFAULT_CHUNK_PROFILES: dict[str, ChunkProfile] = {
+    "chinese_report": ChunkProfile("chinese_report", "chars", 800, 120, 180),
+    "english_paper": ChunkProfile("english_paper", "tokens", 520, 100, 120),
+    "markdown_note": ChunkProfile("markdown_note", "chars", 900, 120, 160),
+    "metadata_only": ChunkProfile("metadata_only", "chars", 900, 0, 80),
+}
 
 
 def enrich_evidence_metadata(
@@ -57,6 +72,8 @@ def enrich_evidence_metadata(
         pages = _metadata_pages(meta)
         content_type = str(meta.get("content_type") or _infer_content_type(doc))
         effective_route = str(meta.get("route") or route)
+        section_path = meta.get("section_path") or []
+        section = meta.get("section") or (section_path[-1] if isinstance(section_path, list) and section_path else "")
         evidence = {
             "schema_version": EVIDENCE_SCHEMA_VERSION,
             "doc_id": str(meta.get("doc_id") or meta.get("document_id") or doc.id),
@@ -66,12 +83,14 @@ def enrich_evidence_metadata(
             "title": doc.title,
             "source": doc.source,
             "source_path": str(meta.get("source_path") or doc.source),
-            "section": str(meta.get("section") or meta.get("section_path") or ""),
-            "section_path": meta.get("section_path") or [],
+            "section": str(section),
+            "section_path": section_path,
             "page": pages[0] if pages else None,
             "pages": pages,
             "bbox": meta.get("bbox"),
             "content_type": content_type,
+            "chunk_profile": str(meta.get("chunk_profile") or ""),
+            "parser": str(meta.get("parser") or ""),
             "year": doc.year or None,
             "backend": doc.backend,
             "route": effective_route,
@@ -106,6 +125,7 @@ def doc_to_evidence_dict(doc: Doc) -> dict[str, Any]:
         "section", "section_path", "content_type", "rank_before", "rank_after",
         "rerank_score", "rerank_reason", "similarity", "vector_similarity",
         "term_similarity", "retrieval_query", "query_variant", "routes",
+        "chunk_profile", "parser",
     ):
         data[key] = evidence.get(key)
     return data
@@ -130,6 +150,10 @@ def _metadata_pages(meta: dict[str, Any]) -> list[int]:
 def _infer_content_type(doc: Doc) -> str:
     if doc.kind == "ragflow_chunk":
         return "paragraph"
+    if doc.kind == "local_markdown_chunk":
+        return str((doc.metadata or {}).get("content_type") or "markdown_section")
+    if doc.kind == "local_pdf_chunk":
+        return str((doc.metadata or {}).get("content_type") or "pdf_text")
     if doc.kind == "local_pdf_metadata":
         return "document_metadata"
     if doc.kind == "local_pdf":
@@ -181,8 +205,8 @@ def _load_docs_cached() -> tuple[Doc, ...]:
     if KNOWLEDGE_JSON.exists():
         raw = json.loads(KNOWLEDGE_JSON.read_text(encoding="utf-8"))
         docs.extend(Doc(**item) for item in raw)
-    docs.extend(load_markdown_docs(KNOWLEDGE_DOCS_DIR))
-    docs.extend(load_pdf_summaries(PDF_REPORTS_DIR))
+    docs.extend(load_structured_markdown_docs(KNOWLEDGE_DOCS_DIR))
+    docs.extend(load_structured_pdf_docs(PDF_REPORTS_DIR))
     return tuple(_dedupe_docs(docs))
 
 
@@ -257,6 +281,407 @@ def _extract_pdf_text(path: Path) -> str:
         return "\n".join(pages).strip()
     except Exception:
         return ""
+
+
+def load_structured_markdown_docs(directory: Path) -> list[Doc]:
+    if not directory.exists():
+        return []
+    docs: list[Doc] = []
+    for path in sorted(directory.glob("*.md")):
+        if path.name.lower() == "readme.md":
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not text:
+            continue
+        title = _first_heading(text) or path.stem
+        topics = _field_list(text, "涓婚")
+        profile = _select_chunk_profile(path, title, text, default="markdown_note")
+        chunks = structure_text_chunks(
+            text=text,
+            doc_id=f"md-{path.stem}",
+            title=title,
+            source_path=path,
+            profile=profile,
+            default_content_type="markdown_section",
+        )
+        if not chunks:
+            chunks = [{
+                "chunk_id": f"md-{path.stem}-c001",
+                "title": title,
+                "text": _field_text(text, "鎽樿") or _compact_text(text, profile.max_size),
+                "section": "",
+                "section_path": [],
+                "page": None,
+                "pages": [],
+                "content_type": "markdown_section",
+                "chunk_index": 1,
+            }]
+        for chunk in chunks:
+            docs.append(
+                Doc(
+                    id=str(chunk["chunk_id"]),
+                    title=str(chunk["title"]),
+                    kind="local_markdown_chunk",
+                    year=_field_year(text) or 0,
+                    source=str(path),
+                    topics=topics,
+                    abstract=str(chunk["text"]),
+                    metadata=_chunk_metadata(
+                        chunk,
+                        doc_id=f"md-{path.stem}",
+                        document_name=path.name,
+                        source_path=path,
+                        profile=profile,
+                        parser="markdown_structure",
+                    ),
+                )
+            )
+    return docs
+
+
+def load_structured_pdf_docs(directory: Path) -> list[Doc]:
+    if not directory.exists():
+        return []
+    docs: list[Doc] = []
+    for path in sorted(directory.rglob("*.pdf")):
+        parse_pdf = os.getenv("OCEAN_PARSE_PDF_ON_LOAD", "").lower() == "true"
+        pages = _extract_pdf_pages(path) if parse_pdf else []
+        text = "\n\n".join(page_text for _page, page_text in pages)
+        title = _clean_pdf_title(path.stem)
+        topics = [term for term in MARINE_TERMS if term in title or term in text]
+        year = _field_year(text) or 0
+        if pages:
+            profile = _select_chunk_profile(path, title, text, default="english_paper")
+            chunks = structure_pdf_chunks(
+                pages=pages,
+                doc_id=f"pdf-{path.stem}",
+                title=title,
+                source_path=path,
+                profile=profile,
+            )
+            for chunk in chunks:
+                docs.append(
+                    Doc(
+                        id=str(chunk["chunk_id"]),
+                        title=str(chunk["title"]),
+                        kind="local_pdf_chunk",
+                        year=year,
+                        source=str(path),
+                        topics=topics,
+                        abstract=str(chunk["text"]),
+                        metadata=_chunk_metadata(
+                            chunk,
+                            doc_id=f"pdf-{path.stem}",
+                            document_name=path.name,
+                            source_path=path,
+                            profile=profile,
+                            parser="pypdf_structure",
+                        ),
+                    )
+                )
+            continue
+
+        profile = DEFAULT_CHUNK_PROFILES["metadata_only"]
+        docs.append(
+            Doc(
+                id=f"pdf-{path.stem}",
+                title=title,
+                kind="local_pdf_metadata",
+                year=year,
+                source=str(path),
+                topics=topics,
+                abstract=_metadata_abstract(path, title, topics),
+                metadata={
+                    "doc_id": f"pdf-{path.stem}",
+                    "chunk_id": f"pdf-{path.stem}",
+                    "document_name": path.name,
+                    "source_path": str(path),
+                    "content_type": "document_metadata",
+                    "chunk_profile": profile.name,
+                    "chunk_unit": profile.unit,
+                    "chunk_max_size": profile.max_size,
+                    "chunk_overlap": profile.overlap,
+                    "parser": "metadata_only",
+                },
+            )
+        )
+    return docs
+
+
+def _extract_pdf_pages(path: Path) -> list[tuple[int, str]]:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except Exception:
+        try:
+            from PyPDF2 import PdfReader  # type: ignore
+        except Exception:
+            return []
+    try:
+        reader = PdfReader(str(path))
+        limit = _env_int("OCEAN_PDF_PAGE_LIMIT", 24)
+        pages: list[tuple[int, str]] = []
+        for index, page in enumerate(reader.pages[: max(1, limit)], 1):
+            text = (page.extract_text() or "").strip()
+            if text:
+                pages.append((index, text))
+        return pages
+    except Exception:
+        return []
+
+
+def structure_text_chunks(
+    text: str,
+    doc_id: str,
+    title: str,
+    source_path: Path,
+    profile: ChunkProfile,
+    default_content_type: str,
+) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    for section in _split_markdown_sections(text):
+        section_path = section["section_path"]
+        section_title = section_path[-1] if section_path else title
+        for piece in _chunk_paragraphs(section["text"], profile):
+            content = piece["text"].strip()
+            if not content:
+                continue
+            index = len(chunks) + 1
+            chunks.append({
+                "chunk_id": f"{doc_id}-c{index:03d}",
+                "title": f"{title} / {section_title}" if section_title and section_title != title else title,
+                "text": content,
+                "section": section_title if section_title != title else "",
+                "section_path": section_path,
+                "page": None,
+                "pages": [],
+                "content_type": _infer_chunk_content_type(content, default_content_type),
+                "chunk_index": index,
+                "char_count": len(content),
+                "token_count": len(re.findall(r"\S+", content)),
+                "source_path": str(source_path),
+            })
+    return chunks
+
+
+def structure_pdf_chunks(
+    pages: list[tuple[int, str]],
+    doc_id: str,
+    title: str,
+    source_path: Path,
+    profile: ChunkProfile,
+) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    current_section = ""
+    for page_num, page_text in pages:
+        for section in _split_pdf_sections(page_text, current_section):
+            if section["section"]:
+                current_section = section["section"]
+            section_path = [current_section] if current_section else []
+            section_title = current_section or f"page {page_num}"
+            for piece in _chunk_paragraphs(section["text"], profile):
+                content = piece["text"].strip()
+                if not content:
+                    continue
+                index = len(chunks) + 1
+                chunks.append({
+                    "chunk_id": f"{doc_id}-p{page_num:03d}-c{index:03d}",
+                    "title": f"{title} / {section_title}",
+                    "text": content,
+                    "section": current_section,
+                    "section_path": section_path,
+                    "page": page_num,
+                    "pages": [page_num],
+                    "content_type": _infer_chunk_content_type(content, "pdf_text"),
+                    "chunk_index": index,
+                    "char_count": len(content),
+                    "token_count": len(re.findall(r"\S+", content)),
+                    "source_path": str(source_path),
+                })
+    return chunks
+
+
+def _split_markdown_sections(text: str) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+    heading_stack: list[str] = []
+    buffer: list[str] = []
+
+    def flush() -> None:
+        content = "\n".join(buffer).strip()
+        if content:
+            sections.append({"section_path": heading_stack[:], "text": content})
+        buffer.clear()
+
+    for line in text.splitlines():
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if match:
+            flush()
+            level = len(match.group(1))
+            heading = match.group(2).strip()
+            heading_stack[:] = heading_stack[: level - 1]
+            heading_stack.append(heading)
+            continue
+        buffer.append(line)
+    flush()
+    return sections or [{"section_path": [], "text": text}]
+
+
+def _split_pdf_sections(text: str, current_section: str) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    buffer: list[str] = []
+    active_section = current_section
+
+    def flush() -> None:
+        content = "\n".join(buffer).strip()
+        if content:
+            sections.append({"section": active_section, "text": content})
+        buffer.clear()
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if _looks_like_pdf_heading(line):
+            flush()
+            active_section = line[:120]
+            continue
+        buffer.append(raw_line)
+    flush()
+    return sections or [{"section": current_section, "text": text}]
+
+
+def _looks_like_pdf_heading(line: str) -> bool:
+    if not line or len(line) > 120:
+        return False
+    if re.match(r"^\d+(\.\d+)*\s+[A-Z][A-Za-z ,:()/&-]{3,}$", line):
+        return True
+    lower = line.lower()
+    common = {
+        "abstract", "introduction", "methods", "methodology", "results",
+        "discussion", "conclusion", "conclusions", "references",
+        "materials and methods", "data and methods",
+    }
+    return lower in common
+
+
+def _chunk_paragraphs(text: str, profile: ChunkProfile) -> list[dict[str, str]]:
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", text) if p.strip()]
+    if not paragraphs:
+        paragraphs = [text.strip()] if text.strip() else []
+    pieces: list[dict[str, str]] = []
+    current: list[str] = []
+
+    for paragraph in paragraphs:
+        if _chunk_size(paragraph, profile) > profile.max_size:
+            if current:
+                pieces.append({"text": "\n\n".join(current)})
+                current = []
+            pieces.extend({"text": part} for part in _split_long_unit(paragraph, profile))
+            continue
+        candidate = "\n\n".join([*current, paragraph]) if current else paragraph
+        if current and _chunk_size(candidate, profile) > profile.max_size:
+            pieces.append({"text": "\n\n".join(current)})
+            overlap = _overlap_tail(pieces[-1]["text"], profile)
+            current = [overlap, paragraph] if overlap else [paragraph]
+        else:
+            current.append(paragraph)
+    if current:
+        pieces.append({"text": "\n\n".join(current)})
+    return [piece for piece in pieces if _chunk_size(piece["text"], profile) >= profile.min_size or len(pieces) == 1]
+
+
+def _split_long_unit(text: str, profile: ChunkProfile) -> list[str]:
+    if profile.unit == "tokens":
+        tokens = re.findall(r"\S+", text)
+        step = max(1, profile.max_size - profile.overlap)
+        return [" ".join(tokens[i : i + profile.max_size]) for i in range(0, len(tokens), step)]
+    step = max(1, profile.max_size - profile.overlap)
+    return [text[i : i + profile.max_size] for i in range(0, len(text), step)]
+
+
+def _chunk_size(text: str, profile: ChunkProfile) -> int:
+    if profile.unit == "tokens":
+        return len(re.findall(r"\S+", text))
+    return len(text)
+
+
+def _overlap_tail(text: str, profile: ChunkProfile) -> str:
+    if profile.overlap <= 0:
+        return ""
+    if profile.unit == "tokens":
+        tokens = re.findall(r"\S+", text)
+        return " ".join(tokens[-profile.overlap:])
+    return text[-profile.overlap:]
+
+
+def _infer_chunk_content_type(text: str, default: str) -> str:
+    stripped = text.strip()
+    lower = stripped.lower()
+    if re.match(r"^(fig\.|figure|图\s*\d+|表\s*\d+|table\s+\d+)", lower):
+        return "figure_caption" if not lower.startswith(("table", "表")) else "table"
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    table_lines = [line for line in lines if line.startswith("|") or "\t" in line]
+    if lines and len(table_lines) / max(1, len(lines)) >= 0.5:
+        return "table"
+    return default
+
+
+def _select_chunk_profile(path: Path, title: str, text: str, default: str) -> ChunkProfile:
+    override = os.getenv("OCEAN_CHUNK_PROFILE", "").strip()
+    if override in DEFAULT_CHUNK_PROFILES:
+        return DEFAULT_CHUNK_PROFILES[override]
+    sample = f"{title}\n{text[:2000]}"
+    if _cjk_ratio(sample) >= 0.12:
+        return DEFAULT_CHUNK_PROFILES["chinese_report"]
+    if path.suffix.lower() == ".pdf":
+        return DEFAULT_CHUNK_PROFILES["english_paper"]
+    return DEFAULT_CHUNK_PROFILES.get(default, DEFAULT_CHUNK_PROFILES["markdown_note"])
+
+
+def _cjk_ratio(text: str) -> float:
+    visible = [ch for ch in text if not ch.isspace()]
+    if not visible:
+        return 0.0
+    cjk = sum(1 for ch in visible if "\u4e00" <= ch <= "\u9fff")
+    return cjk / len(visible)
+
+
+def _chunk_metadata(
+    chunk: dict[str, Any],
+    doc_id: str,
+    document_name: str,
+    source_path: Path,
+    profile: ChunkProfile,
+    parser: str,
+) -> dict[str, Any]:
+    page = chunk.get("page")
+    pages = chunk.get("pages") or ([page] if page else [])
+    section_path = chunk.get("section_path") or []
+    section = chunk.get("section") or (section_path[-1] if isinstance(section_path, list) and section_path else "")
+    return {
+        "doc_id": doc_id,
+        "chunk_id": chunk.get("chunk_id"),
+        "document_name": document_name,
+        "source_path": str(source_path),
+        "section": section,
+        "section_path": section_path,
+        "page": page,
+        "pages": pages,
+        "bbox": chunk.get("bbox"),
+        "content_type": chunk.get("content_type") or "text",
+        "chunk_index": chunk.get("chunk_index"),
+        "char_count": chunk.get("char_count") or len(str(chunk.get("text") or "")),
+        "token_count": chunk.get("token_count") or len(re.findall(r"\S+", str(chunk.get("text") or ""))),
+        "chunk_profile": profile.name,
+        "chunk_unit": profile.unit,
+        "chunk_max_size": profile.max_size,
+        "chunk_overlap": profile.overlap,
+        "parser": parser,
+    }
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
 
 
 def _clean_pdf_title(stem: str) -> str:
@@ -387,6 +812,10 @@ def rag_status() -> dict[str, Any]:
             "knowledge_json": str(KNOWLEDGE_JSON),
             "knowledge_docs_dir": str(KNOWLEDGE_DOCS_DIR),
             "pdf_reports_dir": str(PDF_REPORTS_DIR),
+            "chunk_profiles": {
+                name: asdict(profile) for name, profile in DEFAULT_CHUNK_PROFILES.items()
+            },
+            "pdf_parse_on_load": os.getenv("OCEAN_PARSE_PDF_ON_LOAD", "").lower() == "true",
             "documents": [{"id": doc.id, "title": doc.title, "kind": doc.kind, "source": doc.source} for doc in docs],
         },
         "ragflow": ragflow,
@@ -498,6 +927,8 @@ def _ragflow_doc_from_chunk(chunk: dict[str, Any], index: int, catalog: dict[str
             "vector_similarity": _as_float(chunk.get("vector_similarity"), default=0.0),
             "term_similarity": _as_float(chunk.get("term_similarity"), default=0.0),
             "chunk_count": meta.get("chunk_count"),
+            "chunk_profile": "ragflow_dataset",
+            "parser": "ragflow",
             "run": meta.get("run"),
             "progress": meta.get("progress"),
         },

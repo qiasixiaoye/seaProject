@@ -201,6 +201,8 @@ but new consumers should prefer the normalized block:
   "pages": [3, 4],
   "bbox": null,
   "content_type": "paragraph",
+  "chunk_profile": "english_paper",
+  "parser": "ragflow",
   "year": 2024,
   "backend": "ragflow",
   "route": "ragflow_vector",
@@ -235,6 +237,7 @@ Required fields for retrieval evaluation:
 | `page` / `pages` | Citation and PDF auditability. |
 | `section` / `section_path` | Chunk boundary and answer support analysis. |
 | `content_type` | Distinguish paragraph, table, figure caption, metadata, etc. |
+| `chunk_profile` / `parser` | Explain how the chunk was produced and enable chunking ablation. |
 | `route` | Show whether evidence came from local keyword, RAGFlow vector, hybrid, or rerank path. |
 | `retrieval_query` / `query_variant` | Explain which expanded query produced the selected chunk. |
 | `routes` | Preserve all route hits for duplicated chunks before fusion. |
