@@ -136,7 +136,7 @@ def _build_messages(
     section_list = "、".join(sections)
 
     evidence = "\n\n".join(
-        f"[{i}] 标题：{d.get('title','')}\n"
+        f"{_evidence_label(d, i)} 标题：{d.get('title','')}\n"
         f"来源：{d.get('source','')}\n"
         f"相关分：{d.get('decision_score', d.get('score',0)):.3f}\n"
         f"摘要：{str(d.get('abstract',''))[:300]}"
@@ -164,6 +164,7 @@ def _build_messages(
         f"报告必须包含以下章节：{section_list}。\n"
         "每个核心结论必须引用证据来源（格式：……[来源：文件名·p.页码]）。\n"
         "证据不足时明确说明，不得编造数据。\n"
+        "引用优先使用输入证据标签（如 [E1: doc_id/chunk_id]）。\n"
         "输出中文报告，Markdown 格式，含标题层级。"
     )
 
@@ -195,12 +196,27 @@ def _template_report(
         "",
         "## 保留证据",
     ]
-    for doc in kept_docs:
-        lines.append(f"- {doc.get('title','')}（{doc.get('source','')}）")
+    for i, doc in enumerate(kept_docs, 1):
+        lines.append(f"- {_evidence_label(doc, i)} {doc.get('title','')}（{_source_with_page(doc)}）")
     if not kept_docs:
         lines.append("- 未检索到足够相关证据")
     lines += ["", "## 注", "（本报告由模板生成，请配置 DEEPSEEK_API_KEY 启用 LLM 增强报告）"]
     return "\n".join(lines)
+
+
+def _evidence_label(doc: dict[str, Any], index: int) -> str:
+    doc_id = doc.get("doc_id") or doc.get("id") or "unknown-doc"
+    chunk_id = doc.get("chunk_id") or doc.get("id") or "unknown-chunk"
+    page = doc.get("page")
+    page_text = f", p.{page}" if page else ""
+    return f"[E{index}: {doc_id}/{chunk_id}{page_text}]"
+
+
+def _source_with_page(doc: dict[str, Any]) -> str:
+    page = doc.get("page")
+    if page:
+        return f"{doc.get('source','')} p.{page}"
+    return str(doc.get("source", ""))
 
 
 def _format_numbers(ocean_data: dict) -> str:

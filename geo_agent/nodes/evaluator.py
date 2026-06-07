@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from geo_agent.state import GeoAgentState
+from geo_agent.state import GeoAgentState, normalize_trace
 
 
 def run(state: GeoAgentState) -> dict[str, Any]:
@@ -12,13 +12,14 @@ def run(state: GeoAgentState) -> dict[str, Any]:
     kept = state.get("kept_docs", []) or []
     passed = state.get("passed_docs", []) or []
     data_context = state.get("data_context", {}) or {}
-    trace = list(state.get("trace", []))
+    trace = normalize_trace(list(state.get("trace", [])))
     critic = state.get("critic_result", {}) or {}
 
     citation_coverage = _citation_coverage(report, kept)
     data_grounding = _data_grounding(report, data_context)
     critic_passed = 1.0 if critic.get("passed", True) else 0.0
     trace_completeness = _trace_completeness(trace)
+    trace_schema_completeness = _trace_schema_completeness(trace)
     retrieval_signal = _retrieval_signal(candidates, kept)
     tool_metrics = _tool_metrics(trace)
 
@@ -54,6 +55,7 @@ def run(state: GeoAgentState) -> dict[str, Any]:
         "tools": tool_metrics,
         "trace": {
             "trace_completeness": trace_completeness,
+            "trace_schema_completeness": trace_schema_completeness,
             "node_count": len(trace),
         },
         "system": {
@@ -65,6 +67,7 @@ def run(state: GeoAgentState) -> dict[str, Any]:
         "data_grounding": data_grounding,
         "critic_passed": critic_passed,
         "trace_completeness": trace_completeness,
+        "trace_schema_completeness": trace_schema_completeness,
     }
 
     components = [
@@ -72,6 +75,7 @@ def run(state: GeoAgentState) -> dict[str, Any]:
         data_grounding,
         critic_passed,
         trace_completeness,
+        trace_schema_completeness,
         retrieval_signal,
         tool_metrics["tool_success_rate"] if tool_metrics["tool_success_rate"] is not None else 1.0,
     ]
@@ -100,6 +104,7 @@ def run(state: GeoAgentState) -> dict[str, Any]:
             "data_grounding": data_grounding,
             "critic_passed": critic_passed,
             "trace_completeness": trace_completeness,
+            "trace_schema_completeness": trace_schema_completeness,
         },
     })
     return {"evaluation": result, "trace": trace}
@@ -175,9 +180,10 @@ def _retrieval_signal(candidates: list[dict[str, Any]], kept: list[dict[str, Any
 def _tool_metrics(trace: list[dict[str, Any]]) -> dict[str, Any]:
     calls: list[dict[str, Any]] = []
     for item in trace:
-        if item.get("tool_name") or item.get("tool"):
-            calls.append(item)
-        for nested in item.get("tool_calls", []) or []:
+        details = item.get("details", {}) if isinstance(item.get("details"), dict) else {}
+        if details.get("tool_name") or details.get("tool") or item.get("tool_name") or item.get("tool"):
+            calls.append({**details, **item})
+        for nested in (details.get("tool_calls") or item.get("tool_calls") or []) or []:
             if isinstance(nested, dict):
                 calls.append(nested)
     if not calls:
@@ -205,6 +211,14 @@ def _trace_completeness(trace: list[dict[str, Any]]) -> float:
     }
     seen = {str(item.get("node")) for item in trace}
     return round(len(expected & seen) / len(expected), 3)
+
+
+def _trace_schema_completeness(trace: list[dict[str, Any]]) -> float:
+    required = {"node", "mode", "status", "elapsed_ms", "input_summary", "output_summary", "error"}
+    if not trace:
+        return 0.0
+    complete = sum(1 for item in trace if required <= set(item.keys()))
+    return round(complete / len(trace), 3)
 
 
 def _grade(score: float) -> str:

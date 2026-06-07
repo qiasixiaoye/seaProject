@@ -420,16 +420,50 @@ class CriticAgent(Agent):
 
     def run(self, state: PipelineState, emit: Emit) -> dict[str, Any]:
         if not deepseek_client.configured():
-            verdict = {"passed": True, "issues": [], "feedback": "", "mode": "skipped"}
+            verdict = self._rule_critique(state)
+            verdict["mode"] = "rules"
             emit(agent=self.name, **verdict)
             return verdict
         try:
             verdict = self._llm_critique(state)
+            rule_verdict = self._rule_critique(state)
+            if rule_verdict["issues"]:
+                verdict["issues"] = list(dict.fromkeys([*(verdict.get("issues") or []), *rule_verdict["issues"]]))
+                verdict["feedback"] = " ".join(
+                    part for part in [verdict.get("feedback", ""), rule_verdict.get("feedback", "")] if part
+                ).strip()
+                verdict["passed"] = bool(verdict.get("passed", True)) and rule_verdict["passed"]
         except Exception as exc:
             log.warning("CriticAgent failed, accepting report: %s", exc)
-            verdict = {"passed": True, "issues": [], "feedback": "", "mode": "error"}
+            verdict = self._rule_critique(state)
+            verdict["mode"] = "error_rules"
         emit(agent=self.name, **verdict)
         return verdict
+
+    def _rule_critique(self, state: PipelineState) -> dict[str, Any]:
+        report_text = state.report or ""
+        issues: list[str] = []
+        has_evidence_ref = "[E" in report_text or any(
+            (d.id and d.id in report_text) or (d.title and d.title[:24] in report_text)
+            for d in state.kept
+        )
+        strong_markers = ("必然", "一定", "显著", "主要风险", "high risk", "significant risk", "must")
+        has_strong_claim = any(marker.lower() in report_text.lower() for marker in strong_markers)
+        has_limitation = any(marker in report_text for marker in ("证据不足", "未检索到", "数据局限", "不确定"))
+        if state.kept and not has_evidence_ref:
+            issues.append("citation_missing")
+        if not state.kept and has_strong_claim and not has_limitation:
+            issues.append("unsupported_strong_claim")
+        if state.ocean_context.get("missing_variables") and not has_limitation:
+            issues.append("data_limitation_missing")
+        feedback = []
+        if "citation_missing" in issues:
+            feedback.append("核心结论需要引用保留证据的 [E#]、doc_id 或 chunk_id。")
+        if "unsupported_strong_claim" in issues:
+            feedback.append("无证据时应降低结论强度，并说明证据不足。")
+        if "data_limitation_missing" in issues:
+            feedback.append("需要说明缺失变量或数值上下文限制。")
+        return {"passed": not issues, "issues": issues, "feedback": " ".join(feedback)}
 
     def _llm_critique(self, state: PipelineState) -> dict[str, Any]:
         evidence = "\n".join(f"- {d.title}（{d.source}）" for d in state.kept) or "（无保留证据）"
@@ -535,7 +569,11 @@ class Orchestrator(Agent):
             "passed_documents": [core.doc_to_evidence_dict(d) for d in state.passed],
         }
         if trace:
-            result["trace"] = events
+            try:
+                from geo_agent.state import normalize_trace
+                result["trace"] = normalize_trace(events)
+            except Exception:
+                result["trace"] = events
         return result
 
 

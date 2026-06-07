@@ -33,6 +33,7 @@ def normalize_trace(trace: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         node = str(item.get("node") or item.get("agent") or f"Step{index + 1}")
         mode = str(item.get("mode") or item.get("status") or "default")
         status = "error" if item.get("error") else str(item.get("status") or "ok")
+        error = item.get("error")
         normalized: dict[str, Any] = {
             "index": index,
             "node": node,
@@ -41,9 +42,8 @@ def normalize_trace(trace: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
             "elapsed_ms": item.get("elapsed_ms"),
             "input_summary": item.get("input_summary", {}),
             "output_summary": item.get("output_summary") or _trace_output_summary(item),
+            "error": error,
         }
-        if item.get("error"):
-            normalized["error"] = item.get("error")
         normalized["details"] = {
             k: v for k, v in item.items()
             if k not in {

@@ -63,7 +63,7 @@ def request_batch() -> list[dict[str, Any]]:
         },
         {
             "jsonrpc": "2.0",
-            "id": 7,
+            "id": 4,
             "method": "tools/call",
             "params": {
                 "name": "query_ocean_data",
@@ -74,14 +74,53 @@ def request_batch() -> list[dict[str, Any]]:
                 },
             },
         },
-        {"jsonrpc": "2.0", "id": 4, "method": "resources/list", "params": {}},
         {
             "jsonrpc": "2.0",
             "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "query_ocean_data",
+                "arguments": {
+                    "bounds": {"west": 130, "east": 110, "south": 10, "north": 30},
+                    "include_grid": False,
+                },
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "search_literature",
+                "arguments": {
+                    "query": "marine heatwave coral fishery",
+                    "top_k": 3,
+                    "backend": "local",
+                },
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "run_ocean_report",
+                "arguments": {
+                    "question": "Summarize ocean acidification risks for shellfish.",
+                    "backend": "local",
+                    "top_k": 3,
+                    "trace_summary": True,
+                },
+            },
+        },
+        {"jsonrpc": "2.0", "id": 8, "method": "resources/list", "params": {}},
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
             "method": "resources/read",
             "params": {"uri": "ocean://datasets"},
         },
-        {"jsonrpc": "2.0", "id": 6, "method": "ping", "params": {}},
+        {"jsonrpc": "2.0", "id": 10, "method": "ping", "params": {}},
     ]
 
 
@@ -102,7 +141,7 @@ def main() -> int:
         cwd=str(ROOT),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        timeout=20,
+        timeout=60,
         check=False,
     )
     if proc.returncode != 0:
@@ -110,7 +149,7 @@ def main() -> int:
         raise SystemExit(proc.returncode)
 
     responses = parse_frames(proc.stdout)
-    assert len(responses) == 7, f"expected 7 responses, got {len(responses)}"
+    assert len(responses) == 10, f"expected 10 responses, got {len(responses)}"
 
     init = assert_ok(responses[0], 1)
     assert init["serverInfo"]["name"] == "ocean-geo-agent"
@@ -125,22 +164,42 @@ def main() -> int:
     dataset_payload = json.loads(tool_call["content"][0]["text"])
     assert "datasets" in dataset_payload
 
-    ocean_call = assert_ok(responses[3], 7)
+    ocean_call = assert_ok(responses[3], 4)
     assert ocean_call.get("isError") is False
     ocean_payload = json.loads(ocean_call["content"][0]["text"])
     assert ocean_payload.get("grid_omitted") is True
     assert "stats" in ocean_payload and "values" not in ocean_payload
 
-    resources = assert_ok(responses[4], 4).get("resources", [])
+    invalid_call = assert_ok(responses[4], 5)
+    assert invalid_call.get("isError") is True
+    invalid_payload = json.loads(invalid_call["content"][0]["text"])
+    assert {"code", "message", "details", "retryable"} <= set(invalid_payload), invalid_payload
+    assert invalid_payload["code"] == "validation_error"
+    assert invalid_payload["retryable"] is False
+
+    search_call = assert_ok(responses[5], 6)
+    assert search_call.get("isError") is False
+    search_payload = json.loads(search_call["content"][0]["text"])
+    assert search_payload.get("documents"), search_payload
+    first_doc = search_payload["documents"][0]
+    assert {"doc_id", "chunk_id", "page", "source", "score", "rerank_reason"} <= set(first_doc), first_doc
+
+    report_call = assert_ok(responses[6], 7)
+    assert report_call.get("isError") is False
+    report_payload = json.loads(report_call["content"][0]["text"])
+    assert report_payload.get("report"), report_payload
+    assert "trace_summary" in report_payload and "node_count" in report_payload["trace_summary"]
+
+    resources = assert_ok(responses[7], 8).get("resources", [])
     resource_uris = {item.get("uri") for item in resources}
     assert {"ocean://datasets", "ocean://knowledge"} <= resource_uris
 
-    resource_read = assert_ok(responses[5], 5)
+    resource_read = assert_ok(responses[8], 9)
     contents = resource_read.get("contents", [])
     assert contents and contents[0].get("uri") == "ocean://datasets"
     assert "datasets" in json.loads(contents[0].get("text", "{}"))
 
-    assert_ok(responses[6], 6)
+    assert_ok(responses[9], 10)
     print(json.dumps({
         "status": "ok",
         "responses": len(responses),

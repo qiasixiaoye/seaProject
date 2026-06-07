@@ -1,134 +1,1103 @@
 {
+  "metadata": {
+    "backend": "local",
+    "top_k": 6,
+    "commit_hash": "f0133e0",
+    "started_at_unix": 1780846408.78,
+    "elapsed_ms": 326.6,
+    "dataset": "eval\\dataset.jsonl",
+    "report_json": "eval\\report.json",
+    "report_md": "eval\\report.md"
+  },
   "summary": {
     "n": 10,
     "backend": "local",
+    "top_k": 6,
     "llm_configured": false,
-    "retrieval_hit_rate": 0.9,
-    "avg_topic_recall": 0.9,
-    "avg_citation_coverage": 0.9,
-    "avg_revisions": 0,
-    "avg_latency_ms": 7.82,
+    "recall_at_k": 0.7083,
+    "precision_at_k": 0.3333,
+    "mrr": 0.725,
+    "ndcg_at_k": null,
+    "legacy_retrieval_hit_rate": 0.5,
+    "avg_topic_recall": 0.45,
+    "avg_citation_coverage": 0.7,
+    "avg_trace_completeness": 1.0,
+    "avg_latency_ms": 32.55,
     "avg_groundedness": null
   },
   "results": [
     {
       "id": "q1",
-      "question": "海洋热浪对珊瑚礁和渔业有什么影响，如何应对？",
-      "kept": 3,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "How do marine heatwaves affect coral reefs and fisheries, and what adaptation actions are useful?",
+      "gold": {
+        "relevant_documents": [
+          "mhw-global-warming",
+          "mhw-biodiversity",
+          "md-marine_heatwave_rag_seed"
+        ],
+        "relevant_chunks": [
+          "mhw-global-warming",
+          "mhw-biodiversity",
+          "md-marine_heatwave_rag_seed-c001"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 1.0,
+        "precision_at_k": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 0,
+        "topic_recall": 0.0,
+        "citation_coverage": 0.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 0,
+        "retrieved": 6,
+        "passed": 6
+      },
+      "missed_gold": {
+        "documents": [],
+        "chunks": []
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "mhw-biodiversity",
+          "chunk_id": "mhw-biodiversity",
+          "title": "Marine heatwaves threaten global biodiversity and ecosystem services",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41558-019-0412-1",
+          "score": 0.16035674514745463,
+          "rerank_score": 0.1796,
+          "rerank_reason": "term_overlap=heatwaves, marine, and; metadata_bonus=0.25; base_similarity=0.1604"
+        },
+        {
+          "rank": 2,
+          "doc_id": "mhw-global-warming",
+          "chunk_id": "mhw-global-warming",
+          "title": "Marine heatwaves under global warming",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41586-018-0383-9",
+          "score": 0.10690449676496974,
+          "rerank_score": 0.1264,
+          "rerank_reason": "term_overlap=heatwaves, marine; metadata_bonus=0.25; base_similarity=0.1069"
+        },
+        {
+          "rank": 3,
+          "doc_id": "md-marine_heatwave_rag_seed",
+          "chunk_id": "md-marine_heatwave_rag_seed-c001",
+          "title": "Marine Heatwave RAG Seed",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\marine_heatwave_rag_seed.md",
+          "score": 0.11547005383792516,
+          "rerank_score": 0.1196,
+          "rerank_reason": "term_overlap=marine; metadata_bonus=0.35; base_similarity=0.1155"
+        },
+        {
+          "rank": 4,
+          "doc_id": "pdf-17_significant_wave_height_extreme_variability",
+          "chunk_id": "pdf-17_significant_wave_height_extreme_variability",
+          "title": "17 significant wave height extreme variability",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\17_significant_wave_height_extreme_variability.pdf",
+          "score": 0.17320508075688776,
+          "rerank_score": 0.1154,
+          "rerank_reason": "term_overlap=none; metadata_bonus=0.10; base_similarity=0.1732"
+        },
+        {
+          "rank": 5,
+          "doc_id": "noaa-fisheries-oa",
+          "chunk_id": "noaa-fisheries-oa",
+          "title": "NOAA Fisheries: Understanding Ocean Acidification",
+          "page": null,
+          "source": "https://www.fisheries.noaa.gov/insight/understanding-ocean-acidification",
+          "score": 0.05773502691896258,
+          "rerank_score": 0.0758,
+          "rerank_reason": "term_overlap=fisheries; metadata_bonus=0.25; base_similarity=0.0577"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-12_ibi_strong_wave_incidence",
+          "chunk_id": "pdf-12_ibi_strong_wave_incidence",
+          "title": "12 ibi strong wave incidence",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\12_ibi_strong_wave_incidence.pdf",
+          "score": 0.0769800358919501,
+          "rerank_score": 0.0557,
+          "rerank_reason": "term_overlap=none; metadata_bonus=0.10; base_similarity=0.0770"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 31.0,
+      "latency_ms": 144.2,
       "groundedness": null
     },
     {
       "id": "q2",
-      "question": "海洋酸化如何影响贝类养殖和食品安全？",
-      "kept": 3,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "How does ocean acidification affect shellfish aquaculture and food security?",
+      "gold": {
+        "relevant_documents": [
+          "noaa-oa",
+          "noaa-fisheries-oa",
+          "md-ocean_acidification_rag_seed"
+        ],
+        "relevant_chunks": [
+          "noaa-oa",
+          "noaa-fisheries-oa",
+          "md-ocean_acidification_rag_seed-c001"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 1.0,
+        "precision_at_k": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 1,
+        "topic_recall": 0.5,
+        "citation_coverage": 1.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 3,
+        "retrieved": 6,
+        "passed": 3
+      },
+      "missed_gold": {
+        "documents": [],
+        "chunks": []
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "md-ocean_acidification_rag_seed",
+          "chunk_id": "md-ocean_acidification_rag_seed-c001",
+          "title": "Ocean Acidification RAG Seed",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\ocean_acidification_rag_seed.md",
+          "score": 0.4365641250653993,
+          "rerank_score": 0.3461,
+          "rerank_reason": "term_overlap=acidification, ocean; metadata_bonus=0.35; base_similarity=0.4366"
+        },
+        {
+          "rank": 2,
+          "doc_id": "noaa-oa",
+          "chunk_id": "noaa-oa",
+          "title": "NOAA Ocean Acidification Overview",
+          "page": null,
+          "source": "https://oceanacidification.noaa.gov/what-is-ocean-acidification/",
+          "score": 0.4365641250653993,
+          "rerank_score": 0.3381,
+          "rerank_reason": "term_overlap=acidification, ocean; metadata_bonus=0.25; base_similarity=0.4366"
+        },
+        {
+          "rank": 3,
+          "doc_id": "noaa-fisheries-oa",
+          "chunk_id": "noaa-fisheries-oa",
+          "title": "NOAA Fisheries: Understanding Ocean Acidification",
+          "page": null,
+          "source": "https://www.fisheries.noaa.gov/insight/understanding-ocean-acidification",
+          "score": 0.38805700005813276,
+          "rerank_score": 0.308,
+          "rerank_reason": "term_overlap=acidification, ocean; metadata_bonus=0.25; base_similarity=0.3881"
+        },
+        {
+          "rank": 4,
+          "doc_id": "mhw-biodiversity",
+          "chunk_id": "mhw-biodiversity",
+          "title": "Marine heatwaves threaten global biodiversity and ecosystem services",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41558-019-0412-1",
+          "score": 0.09701425001453319,
+          "rerank_score": 0.1039,
+          "rerank_reason": "term_overlap=and; metadata_bonus=0.25; base_similarity=0.0970"
+        },
+        {
+          "rank": 5,
+          "doc_id": "pdf-04_global_ocean_reanalysis_phy",
+          "chunk_id": "pdf-04_global_ocean_reanalysis_phy",
+          "title": "04 global ocean reanalysis phy",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\04_global_ocean_reanalysis_phy.pdf",
+          "score": 0.11547005383792516,
+          "rerank_score": 0.1033,
+          "rerank_reason": "term_overlap=ocean; metadata_bonus=0.10; base_similarity=0.1155"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-20_ibi_ocean_heat_content",
+          "chunk_id": "pdf-20_ibi_ocean_heat_content",
+          "title": "20 ibi ocean heat content",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\20_ibi_ocean_heat_content.pdf",
+          "score": 0.11547005383792516,
+          "rerank_score": 0.1033,
+          "rerank_reason": "term_overlap=ocean; metadata_bonus=0.10; base_similarity=0.1155"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 5.0,
+      "latency_ms": 24.1,
       "groundedness": null
     },
     {
       "id": "q3",
-      "question": "海平面上升带来的气候风险与适应治理路径？",
-      "kept": 1,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "What climate risks and adaptation governance pathways are associated with sea-level rise?",
+      "gold": {
+        "relevant_documents": [
+          "ipcc-srocc",
+          "pdf-2019年中国海平面公报_b76facc7",
+          "pdf-2020年中国海平面公报_d79a1558"
+        ],
+        "relevant_chunks": [
+          "ipcc-srocc",
+          "pdf-2019年中国海平面公报_b76facc7",
+          "pdf-2020年中国海平面公报_d79a1558"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 1.0,
+        "precision_at_k": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 0,
+        "topic_recall": 0.0,
+        "citation_coverage": 1.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 1,
+        "retrieved": 6,
+        "passed": 5
+      },
+      "missed_gold": {
+        "documents": [],
+        "chunks": []
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "ipcc-srocc",
+          "chunk_id": "ipcc-srocc",
+          "title": "IPCC SROCC Summary for Policymakers",
+          "page": null,
+          "source": "https://www.ipcc.ch/srocc/chapter/summary-for-policymakers/",
+          "score": 0.3674234614174767,
+          "rerank_score": 0.2478,
+          "rerank_reason": "term_overlap=none; metadata_bonus=0.25; base_similarity=0.3674"
+        },
+        {
+          "rank": 2,
+          "doc_id": "pdf-07_in_situ_sea_level",
+          "chunk_id": "pdf-07_in_situ_sea_level",
+          "title": "07 in situ sea level",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\07_in_situ_sea_level.pdf",
+          "score": 0.2041241452319315,
+          "rerank_score": 0.1346,
+          "rerank_reason": "term_overlap=none; metadata_bonus=0.10; base_similarity=0.2041"
+        },
+        {
+          "rank": 3,
+          "doc_id": "pdf-2019年中国海平面公报_b76facc7",
+          "chunk_id": "pdf-2019年中国海平面公报_b76facc7",
+          "title": "2019年中国海平面公报",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2019年中国海平面公报_b76facc7.pdf",
+          "score": 0.12247448713915891,
+          "rerank_score": 0.0839,
+          "rerank_reason": "term_overlap=none; metadata_bonus=0.10; base_similarity=0.1225"
+        },
+        {
+          "rank": 4,
+          "doc_id": "pdf-2020年中国海平面公报_d79a1558",
+          "chunk_id": "pdf-2020年中国海平面公报_d79a1558",
+          "title": "2020年中国海平面公报",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2020年中国海平面公报_d79a1558.pdf",
+          "score": 0.12247448713915891,
+          "rerank_score": 0.0839,
+          "rerank_reason": "term_overlap=none; metadata_bonus=0.10; base_similarity=0.1225"
+        },
+        {
+          "rank": 5,
+          "doc_id": "mhw-biodiversity",
+          "chunk_id": "mhw-biodiversity",
+          "title": "Marine heatwaves threaten global biodiversity and ecosystem services",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41558-019-0412-1",
+          "score": 0.05773502691896258,
+          "rerank_score": 0.0774,
+          "rerank_reason": "term_overlap=and; metadata_bonus=0.25; base_similarity=0.0577"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-01_sea_surface_salinity___multi-observation",
+          "chunk_id": "pdf-01_sea_surface_salinity___multi-observation",
+          "title": "01 sea surface salinity   multi-observation",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\01_sea_surface_salinity___multi-observation.pdf",
+          "score": 0.08944271909999159,
+          "rerank_score": 0.0635,
+          "rerank_reason": "term_overlap=none; metadata_bonus=0.10; base_similarity=0.0894"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 5.5,
+      "latency_ms": 22.9,
       "groundedness": null
     },
     {
       "id": "q4",
-      "question": "中国近岸海域环境质量总体状况如何？",
-      "kept": 6,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "What do recent China coastal and marine ecological environment bulletins say about coastal water quality?",
+      "gold": {
+        "relevant_documents": [
+          "pdf-2023年中国海洋生态环境状况公报_236f8ebc",
+          "pdf-2021年中国海洋生态环境状况公报_718d3939",
+          "pdf-2018年中国海洋生态环境状况公报_2bfff7c8"
+        ],
+        "relevant_chunks": [
+          "pdf-2023年中国海洋生态环境状况公报_236f8ebc",
+          "pdf-2021年中国海洋生态环境状况公报_718d3939",
+          "pdf-2018年中国海洋生态环境状况公报_2bfff7c8"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 0.0,
+        "precision_at_k": 0.0,
+        "mrr": 0.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 0,
+        "topic_recall": 0.0,
+        "citation_coverage": 0.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 0,
+        "retrieved": 4,
+        "passed": 4
+      },
+      "missed_gold": {
+        "documents": [
+          "pdf-2023年中国海洋生态环境状况公报_236f8ebc",
+          "pdf-2021年中国海洋生态环境状况公报_718d3939",
+          "pdf-2018年中国海洋生态环境状况公报_2bfff7c8"
+        ],
+        "chunks": [
+          "pdf-2023年中国海洋生态环境状况公报_236f8ebc",
+          "pdf-2021年中国海洋生态环境状况公报_718d3939",
+          "pdf-2018年中国海洋生态环境状况公报_2bfff7c8"
+        ]
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "mhw-biodiversity",
+          "chunk_id": "mhw-biodiversity",
+          "title": "Marine heatwaves threaten global biodiversity and ecosystem services",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41558-019-0412-1",
+          "score": 0.10690449676496974,
+          "rerank_score": 0.1264,
+          "rerank_reason": "term_overlap=marine, and; metadata_bonus=0.25; base_similarity=0.1069"
+        },
+        {
+          "rank": 2,
+          "doc_id": "md-marine_heatwave_rag_seed",
+          "chunk_id": "md-marine_heatwave_rag_seed-c001",
+          "title": "Marine Heatwave RAG Seed",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\marine_heatwave_rag_seed.md",
+          "score": 0.07071067811865475,
+          "rerank_score": 0.0919,
+          "rerank_reason": "term_overlap=marine; metadata_bonus=0.35; base_similarity=0.0707"
+        },
+        {
+          "rank": 3,
+          "doc_id": "mhw-global-warming",
+          "chunk_id": "mhw-global-warming",
+          "title": "Marine heatwaves under global warming",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41586-018-0383-9",
+          "score": 0.07071067811865475,
+          "rerank_score": 0.0839,
+          "rerank_reason": "term_overlap=marine; metadata_bonus=0.25; base_similarity=0.0707"
+        },
+        {
+          "rank": 4,
+          "doc_id": "pdf-38_mediterranean_water_mass_formation",
+          "chunk_id": "pdf-38_mediterranean_water_mass_formation",
+          "title": "38 mediterranean water mass formation",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\38_mediterranean_water_mass_formation.pdf",
+          "score": 0.07071067811865475,
+          "rerank_score": 0.0719,
+          "rerank_reason": "term_overlap=water; metadata_bonus=0.10; base_similarity=0.0707"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 5.7,
+      "latency_ms": 15.4,
       "groundedness": null
     },
     {
       "id": "q5",
-      "question": "海洋灾害（风暴潮、海浪）的主要风险有哪些？",
-      "kept": 4,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "What are the main risks from marine disasters such as storm surge and waves?",
+      "gold": {
+        "relevant_documents": [
+          "pdf-2020年中国海洋灾害公报_6e47b2e7",
+          "pdf-2020年福建省海洋灾害公报_e75caebe",
+          "pdf-2022年福建省海洋灾害公报_69a2428d"
+        ],
+        "relevant_chunks": [
+          "pdf-2020年中国海洋灾害公报_6e47b2e7",
+          "pdf-2020年福建省海洋灾害公报_e75caebe",
+          "pdf-2022年福建省海洋灾害公报_69a2428d"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 0.0,
+        "precision_at_k": 0.0,
+        "mrr": 0.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 0,
+        "topic_recall": 0.0,
+        "citation_coverage": 0.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 0,
+        "retrieved": 6,
+        "passed": 6
+      },
+      "missed_gold": {
+        "documents": [
+          "pdf-2020年中国海洋灾害公报_6e47b2e7",
+          "pdf-2020年福建省海洋灾害公报_e75caebe",
+          "pdf-2022年福建省海洋灾害公报_69a2428d"
+        ],
+        "chunks": [
+          "pdf-2020年中国海洋灾害公报_6e47b2e7",
+          "pdf-2020年福建省海洋灾害公报_e75caebe",
+          "pdf-2022年福建省海洋灾害公报_69a2428d"
+        ]
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "pdf-17_significant_wave_height_extreme_variability",
+          "chunk_id": "pdf-17_significant_wave_height_extreme_variability",
+          "title": "17 significant wave height extreme variability",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\17_significant_wave_height_extreme_variability.pdf",
+          "score": 0.3,
+          "rerank_score": 0.194,
+          "rerank_reason": "term_overlap=none; metadata_bonus=0.10; base_similarity=0.3000"
+        },
+        {
+          "rank": 2,
+          "doc_id": "mhw-biodiversity",
+          "chunk_id": "mhw-biodiversity",
+          "title": "Marine heatwaves threaten global biodiversity and ecosystem services",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41558-019-0412-1",
+          "score": 0.10690449676496974,
+          "rerank_score": 0.1264,
+          "rerank_reason": "term_overlap=marine, and; metadata_bonus=0.25; base_similarity=0.1069"
+        },
+        {
+          "rank": 3,
+          "doc_id": "md-marine_heatwave_rag_seed",
+          "chunk_id": "md-marine_heatwave_rag_seed-c001",
+          "title": "Marine Heatwave RAG Seed",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\marine_heatwave_rag_seed.md",
+          "score": 0.05345224838248487,
+          "rerank_score": 0.0812,
+          "rerank_reason": "term_overlap=marine; metadata_bonus=0.35; base_similarity=0.0535"
+        },
+        {
+          "rank": 4,
+          "doc_id": "pdf-09_global_waves_forecast",
+          "chunk_id": "pdf-09_global_waves_forecast",
+          "title": "09 global waves forecast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\09_global_waves_forecast.pdf",
+          "score": 0.08,
+          "rerank_score": 0.0776,
+          "rerank_reason": "term_overlap=waves; metadata_bonus=0.10; base_similarity=0.0800"
+        },
+        {
+          "rank": 5,
+          "doc_id": "pdf-27_ibi_multiyear_waves",
+          "chunk_id": "pdf-27_ibi_multiyear_waves",
+          "title": "27 ibi multiyear waves",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\27_ibi_multiyear_waves.pdf",
+          "score": 0.08,
+          "rerank_score": 0.0776,
+          "rerank_reason": "term_overlap=waves; metadata_bonus=0.10; base_similarity=0.0800"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-30_mediterranean_multiyear_waves",
+          "chunk_id": "pdf-30_mediterranean_multiyear_waves",
+          "title": "30 mediterranean multiyear waves",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\30_mediterranean_multiyear_waves.pdf",
+          "score": 0.08,
+          "rerank_score": 0.0776,
+          "rerank_reason": "term_overlap=waves; metadata_bonus=0.10; base_similarity=0.0800"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 5.5,
+      "latency_ms": 21.0,
       "groundedness": null
     },
     {
       "id": "q6",
-      "question": "全球变暖背景下海洋生物多样性与生态系统服务面临哪些威胁？",
-      "kept": 3,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "Under global warming, what threats do marine biodiversity and ecosystem services face?",
+      "gold": {
+        "relevant_documents": [
+          "mhw-biodiversity",
+          "mhw-global-warming",
+          "ipcc-srocc"
+        ],
+        "relevant_chunks": [
+          "mhw-biodiversity",
+          "mhw-global-warming",
+          "ipcc-srocc"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 0.6667,
+        "precision_at_k": 0.3333,
+        "mrr": 1.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 1,
+        "topic_recall": 1.0,
+        "citation_coverage": 1.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 2,
+        "retrieved": 6,
+        "passed": 4
+      },
+      "missed_gold": {
+        "documents": [
+          "ipcc-srocc"
+        ],
+        "chunks": [
+          "ipcc-srocc"
+        ]
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "mhw-biodiversity",
+          "chunk_id": "mhw-biodiversity",
+          "title": "Marine heatwaves threaten global biodiversity and ecosystem services",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41558-019-0412-1",
+          "score": 0.35355339059327373,
+          "rerank_score": 0.3691,
+          "rerank_reason": "term_overlap=biodiversity, ecosystem, services, global, marine; metadata_bonus=0.25; base_similarity=0.3536"
+        },
+        {
+          "rank": 2,
+          "doc_id": "mhw-global-warming",
+          "chunk_id": "mhw-global-warming",
+          "title": "Marine heatwaves under global warming",
+          "page": null,
+          "source": "https://www.nature.com/articles/s41586-018-0383-9",
+          "score": 0.282842712474619,
+          "rerank_score": 0.282,
+          "rerank_reason": "term_overlap=warming, marine, global, under; metadata_bonus=0.25; base_similarity=0.2828"
+        },
+        {
+          "rank": 3,
+          "doc_id": "md-marine_heatwave_rag_seed",
+          "chunk_id": "md-marine_heatwave_rag_seed-c001",
+          "title": "Marine Heatwave RAG Seed",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\marine_heatwave_rag_seed.md",
+          "score": 0.07071067811865475,
+          "rerank_score": 0.0935,
+          "rerank_reason": "term_overlap=marine; metadata_bonus=0.35; base_similarity=0.0707"
+        },
+        {
+          "rank": 4,
+          "doc_id": "pdf-04_global_ocean_reanalysis_phy",
+          "chunk_id": "pdf-04_global_ocean_reanalysis_phy",
+          "title": "04 global ocean reanalysis phy",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\04_global_ocean_reanalysis_phy.pdf",
+          "score": 0.07071067811865475,
+          "rerank_score": 0.0735,
+          "rerank_reason": "term_overlap=global; metadata_bonus=0.10; base_similarity=0.0707"
+        },
+        {
+          "rank": 5,
+          "doc_id": "pdf-09_global_waves_forecast",
+          "chunk_id": "pdf-09_global_waves_forecast",
+          "title": "09 global waves forecast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\09_global_waves_forecast.pdf",
+          "score": 0.07071067811865475,
+          "rerank_score": 0.0735,
+          "rerank_reason": "term_overlap=global; metadata_bonus=0.10; base_similarity=0.0707"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-11_global_physical_forecast",
+          "chunk_id": "pdf-11_global_physical_forecast",
+          "title": "11 global physical forecast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\11_global_physical_forecast.pdf",
+          "score": 0.07071067811865475,
+          "rerank_score": 0.0735,
+          "rerank_reason": "term_overlap=global; metadata_bonus=0.10; base_similarity=0.0707"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 5.6,
+      "latency_ms": 15.6,
       "groundedness": null
     },
     {
       "id": "q7",
-      "question": "IPCC 对海洋与冰冻圈变化的主要结论和治理建议是什么？",
-      "kept": 1,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "What are the main IPCC SROCC conclusions and governance recommendations for ocean and cryosphere change?",
+      "gold": {
+        "relevant_documents": [
+          "ipcc-srocc"
+        ],
+        "relevant_chunks": [
+          "ipcc-srocc"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 1.0,
+        "precision_at_k": 0.1667,
+        "mrr": 0.25,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 0,
+        "topic_recall": 0.0,
+        "citation_coverage": 1.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 3,
+        "retrieved": 6,
+        "passed": 3
+      },
+      "missed_gold": {
+        "documents": [],
+        "chunks": []
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "md-ocean_acidification_rag_seed",
+          "chunk_id": "md-ocean_acidification_rag_seed-c001",
+          "title": "Ocean Acidification RAG Seed",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\ocean_acidification_rag_seed.md",
+          "score": 0.42640143271122083,
+          "rerank_score": 0.3325,
+          "rerank_reason": "term_overlap=ocean, ipcc; metadata_bonus=0.35; base_similarity=0.4264"
+        },
+        {
+          "rank": 2,
+          "doc_id": "noaa-oa",
+          "chunk_id": "noaa-oa",
+          "title": "NOAA Ocean Acidification Overview",
+          "page": null,
+          "source": "https://oceanacidification.noaa.gov/what-is-ocean-acidification/",
+          "score": 0.38376128944009874,
+          "rerank_score": 0.278,
+          "rerank_reason": "term_overlap=ocean; metadata_bonus=0.25; base_similarity=0.3838"
+        },
+        {
+          "rank": 3,
+          "doc_id": "noaa-fisheries-oa",
+          "chunk_id": "noaa-fisheries-oa",
+          "title": "NOAA Fisheries: Understanding Ocean Acidification",
+          "page": null,
+          "source": "https://www.fisheries.noaa.gov/insight/understanding-ocean-acidification",
+          "score": 0.34112114616897665,
+          "rerank_score": 0.2515,
+          "rerank_reason": "term_overlap=ocean; metadata_bonus=0.25; base_similarity=0.3411"
+        },
+        {
+          "rank": 4,
+          "doc_id": "ipcc-srocc",
+          "chunk_id": "ipcc-srocc",
+          "title": "IPCC SROCC Summary for Policymakers",
+          "page": null,
+          "source": "https://www.ipcc.ch/srocc/chapter/summary-for-policymakers/",
+          "score": 0.21320071635561041,
+          "rerank_score": 0.2123,
+          "rerank_reason": "term_overlap=srocc, ipcc, for; metadata_bonus=0.25; base_similarity=0.2132"
+        },
+        {
+          "rank": 5,
+          "doc_id": "pdf-04_global_ocean_reanalysis_phy",
+          "chunk_id": "pdf-04_global_ocean_reanalysis_phy",
+          "title": "04 global ocean reanalysis phy",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\04_global_ocean_reanalysis_phy.pdf",
+          "score": 0.11547005383792516,
+          "rerank_score": 0.0996,
+          "rerank_reason": "term_overlap=ocean; metadata_bonus=0.10; base_similarity=0.1155"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-20_ibi_ocean_heat_content",
+          "chunk_id": "pdf-20_ibi_ocean_heat_content",
+          "title": "20 ibi ocean heat content",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\20_ibi_ocean_heat_content.pdf",
+          "score": 0.11547005383792516,
+          "rerank_score": 0.0996,
+          "rerank_reason": "term_overlap=ocean; metadata_bonus=0.10; base_similarity=0.1155"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 5.3,
+      "latency_ms": 20.8,
       "groundedness": null
     },
     {
       "id": "q8",
-      "question": "有哪些海表温度（SST）及其极端变化的监测/再分析产品？",
-      "kept": 6,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "Which products monitor sea surface temperature (SST) and extreme temperature variability?",
+      "gold": {
+        "relevant_documents": [
+          "pdf-06_baltic_north_sea_sst",
+          "pdf-14_sea_temperature_extreme_variability",
+          "pdf-49_global_sst_l4_reprocessed"
+        ],
+        "relevant_chunks": [
+          "pdf-06_baltic_north_sea_sst",
+          "pdf-14_sea_temperature_extreme_variability",
+          "pdf-49_global_sst_l4_reprocessed"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 0.6667,
+        "precision_at_k": 0.3333,
+        "mrr": 1.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 1,
+        "topic_recall": 1.0,
+        "citation_coverage": 1.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 6,
+        "retrieved": 6,
+        "passed": 0
+      },
+      "missed_gold": {
+        "documents": [
+          "pdf-49_global_sst_l4_reprocessed"
+        ],
+        "chunks": [
+          "pdf-49_global_sst_l4_reprocessed"
+        ]
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "pdf-06_baltic_north_sea_sst",
+          "chunk_id": "pdf-06_baltic_north_sea_sst",
+          "title": "06 baltic north sea sst",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\06_baltic_north_sea_sst.pdf",
+          "score": 0.38805700005813276,
+          "rerank_score": 0.296,
+          "rerank_reason": "term_overlap=sst, sea; metadata_bonus=0.10; base_similarity=0.3881"
+        },
+        {
+          "rank": 2,
+          "doc_id": "pdf-41_baltic_north_sea_sst_nrt",
+          "chunk_id": "pdf-41_baltic_north_sea_sst_nrt",
+          "title": "41 baltic north sea sst nrt",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\41_baltic_north_sea_sst_nrt.pdf",
+          "score": 0.38805700005813276,
+          "rerank_score": 0.296,
+          "rerank_reason": "term_overlap=sst, sea; metadata_bonus=0.10; base_similarity=0.3881"
+        },
+        {
+          "rank": 3,
+          "doc_id": "pdf-14_sea_temperature_extreme_variability",
+          "chunk_id": "pdf-14_sea_temperature_extreme_variability",
+          "title": "14 sea temperature extreme variability",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\14_sea_temperature_extreme_variability.pdf",
+          "score": 0.25298221281347033,
+          "rerank_score": 0.2597,
+          "rerank_reason": "term_overlap=variability, temperature, extreme, sea; metadata_bonus=0.10; base_similarity=0.2530"
+        },
+        {
+          "rank": 4,
+          "doc_id": "pdf-33_atlantic_sst_nrt",
+          "chunk_id": "pdf-33_atlantic_sst_nrt",
+          "title": "33 atlantic sst nrt",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\33_atlantic_sst_nrt.pdf",
+          "score": 0.33954987505086615,
+          "rerank_score": 0.2422,
+          "rerank_reason": "term_overlap=sst; metadata_bonus=0.10; base_similarity=0.3395"
+        },
+        {
+          "rank": 5,
+          "doc_id": "pdf-37_atlantic_sst_reprocessed",
+          "chunk_id": "pdf-37_atlantic_sst_reprocessed",
+          "title": "37 atlantic sst reprocessed",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\37_atlantic_sst_reprocessed.pdf",
+          "score": 0.33954987505086615,
+          "rerank_score": 0.2422,
+          "rerank_reason": "term_overlap=sst; metadata_bonus=0.10; base_similarity=0.3395"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-45_mediterranean_sst_indicators",
+          "chunk_id": "pdf-45_mediterranean_sst_indicators",
+          "title": "45 mediterranean sst indicators",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\45_mediterranean_sst_indicators.pdf",
+          "score": 0.33954987505086615,
+          "rerank_score": 0.2422,
+          "rerank_reason": "term_overlap=sst; metadata_bonus=0.10; base_similarity=0.3395"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 4.9,
+      "latency_ms": 21.2,
       "groundedness": null
     },
     {
       "id": "q9",
-      "question": "有效波高极值与近岸强浪事件的相关数据产品？",
-      "kept": 0,
-      "candidates": 6,
-      "retrieval_hit": 0,
-      "topic_recall": 0.0,
-      "citation_coverage": 0.0,
+      "question": "Which data products are relevant for significant wave height extremes and coastal strong-wave events?",
+      "gold": {
+        "relevant_documents": [
+          "pdf-17_significant_wave_height_extreme_variability",
+          "pdf-12_ibi_strong_wave_incidence",
+          "pdf-23_ibi_wave_forecast"
+        ],
+        "relevant_chunks": [
+          "pdf-17_significant_wave_height_extreme_variability",
+          "pdf-12_ibi_strong_wave_incidence",
+          "pdf-23_ibi_wave_forecast"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 1.0,
+        "precision_at_k": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 1,
+        "topic_recall": 1.0,
+        "citation_coverage": 1.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 1,
+        "retrieved": 6,
+        "passed": 5
+      },
+      "missed_gold": {
+        "documents": [],
+        "chunks": []
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "pdf-17_significant_wave_height_extreme_variability",
+          "chunk_id": "pdf-17_significant_wave_height_extreme_variability",
+          "title": "17 significant wave height extreme variability",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\17_significant_wave_height_extreme_variability.pdf",
+          "score": 0.3,
+          "rerank_score": 0.2541,
+          "rerank_reason": "term_overlap=significant, height, wave; metadata_bonus=0.10; base_similarity=0.3000"
+        },
+        {
+          "rank": 2,
+          "doc_id": "pdf-12_ibi_strong_wave_incidence",
+          "chunk_id": "pdf-12_ibi_strong_wave_incidence",
+          "title": "12 ibi strong wave incidence",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\12_ibi_strong_wave_incidence.pdf",
+          "score": 0.1,
+          "rerank_score": 0.09,
+          "rerank_reason": "term_overlap=wave; metadata_bonus=0.10; base_similarity=0.1000"
+        },
+        {
+          "rank": 3,
+          "doc_id": "pdf-23_ibi_wave_forecast",
+          "chunk_id": "pdf-23_ibi_wave_forecast",
+          "title": "23 ibi wave forecast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\23_ibi_wave_forecast.pdf",
+          "score": 0.1,
+          "rerank_score": 0.09,
+          "rerank_reason": "term_overlap=wave; metadata_bonus=0.10; base_similarity=0.1000"
+        },
+        {
+          "rank": 4,
+          "doc_id": "pdf-42_mediterranean_wave_forecast",
+          "chunk_id": "pdf-42_mediterranean_wave_forecast",
+          "title": "42 mediterranean wave forecast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\42_mediterranean_wave_forecast.pdf",
+          "score": 0.1,
+          "rerank_score": 0.09,
+          "rerank_reason": "term_overlap=wave; metadata_bonus=0.10; base_similarity=0.1000"
+        },
+        {
+          "rank": 5,
+          "doc_id": "pdf-44_black_sea_wave_forecast",
+          "chunk_id": "pdf-44_black_sea_wave_forecast",
+          "title": "44 black sea wave forecast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\44_black_sea_wave_forecast.pdf",
+          "score": 0.1,
+          "rerank_score": 0.09,
+          "rerank_reason": "term_overlap=wave; metadata_bonus=0.10; base_similarity=0.1000"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-47_northwest_shelf_wave_forecast",
+          "chunk_id": "pdf-47_northwest_shelf_wave_forecast",
+          "title": "47 northwest shelf wave forecast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\47_northwest_shelf_wave_forecast.pdf",
+          "score": 0.1,
+          "rerank_score": 0.09,
+          "rerank_reason": "term_overlap=wave; metadata_bonus=0.10; base_similarity=0.1000"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 5.0,
+      "latency_ms": 20.1,
       "groundedness": null
     },
     {
       "id": "q10",
-      "question": "海洋碳观测与生物地球化学（BGC）相关产品有哪些？",
-      "kept": 6,
-      "candidates": 6,
-      "retrieval_hit": 1,
-      "topic_recall": 1.0,
-      "citation_coverage": 1.0,
+      "question": "Which ocean carbon observation and biogeochemical (BGC) products are available?",
+      "gold": {
+        "relevant_documents": [
+          "pdf-02_in_situ_carbon_observations",
+          "pdf-10_baltic_sea_physical___bgc",
+          "pdf-16_global_bgc_lmtl_biomass",
+          "pdf-25_global_bgc_multiyear_hindcast"
+        ],
+        "relevant_chunks": [
+          "pdf-02_in_situ_carbon_observations",
+          "pdf-10_baltic_sea_physical___bgc",
+          "pdf-16_global_bgc_lmtl_biomass",
+          "pdf-25_global_bgc_multiyear_hindcast"
+        ]
+      },
+      "metrics": {
+        "recall_at_k": 0.75,
+        "precision_at_k": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": null,
+        "legacy_retrieval_hit": 1,
+        "topic_recall": 1.0,
+        "citation_coverage": 1.0,
+        "trace_completeness": 1.0,
+        "trace_event_count": 6
+      },
+      "counts": {
+        "kept": 6,
+        "retrieved": 6,
+        "passed": 0
+      },
+      "missed_gold": {
+        "documents": [
+          "pdf-02_in_situ_carbon_observations"
+        ],
+        "chunks": [
+          "pdf-02_in_situ_carbon_observations"
+        ]
+      },
+      "top_retrieved": [
+        {
+          "rank": 1,
+          "doc_id": "pdf-10_baltic_sea_physical___bgc",
+          "chunk_id": "pdf-10_baltic_sea_physical___bgc",
+          "title": "10 baltic sea physical   bgc",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\10_baltic_sea_physical___bgc.pdf",
+          "score": 0.5099019513592785,
+          "rerank_score": 0.3479,
+          "rerank_reason": "term_overlap=bgc; metadata_bonus=0.10; base_similarity=0.5099"
+        },
+        {
+          "rank": 2,
+          "doc_id": "pdf-13_arctic_phy_ice_bgc",
+          "chunk_id": "pdf-13_arctic_phy_ice_bgc",
+          "title": "13 arctic phy ice bgc",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\13_arctic_phy_ice_bgc.pdf",
+          "score": 0.5099019513592785,
+          "rerank_score": 0.3479,
+          "rerank_reason": "term_overlap=bgc; metadata_bonus=0.10; base_similarity=0.5099"
+        },
+        {
+          "rank": 3,
+          "doc_id": "pdf-16_global_bgc_lmtl_biomass",
+          "chunk_id": "pdf-16_global_bgc_lmtl_biomass",
+          "title": "16 global bgc lmtl biomass",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\16_global_bgc_lmtl_biomass.pdf",
+          "score": 0.5099019513592785,
+          "rerank_score": 0.3479,
+          "rerank_reason": "term_overlap=bgc; metadata_bonus=0.10; base_similarity=0.5099"
+        },
+        {
+          "rank": 4,
+          "doc_id": "pdf-18_ibi_bgc_forecast",
+          "chunk_id": "pdf-18_ibi_bgc_forecast",
+          "title": "18 ibi bgc forecast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\18_ibi_bgc_forecast.pdf",
+          "score": 0.5099019513592785,
+          "rerank_score": 0.3479,
+          "rerank_reason": "term_overlap=bgc; metadata_bonus=0.10; base_similarity=0.5099"
+        },
+        {
+          "rank": 5,
+          "doc_id": "pdf-24_ibi_multiyear_bgc",
+          "chunk_id": "pdf-24_ibi_multiyear_bgc",
+          "title": "24 ibi multiyear bgc",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\24_ibi_multiyear_bgc.pdf",
+          "score": 0.5099019513592785,
+          "rerank_score": 0.3479,
+          "rerank_reason": "term_overlap=bgc; metadata_bonus=0.10; base_similarity=0.5099"
+        },
+        {
+          "rank": 6,
+          "doc_id": "pdf-25_global_bgc_multiyear_hindcast",
+          "chunk_id": "pdf-25_global_bgc_multiyear_hindcast",
+          "title": "25 global bgc multiyear hindcast",
+          "page": null,
+          "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\25_global_bgc_multiyear_hindcast.pdf",
+          "score": 0.5099019513592785,
+          "rerank_score": 0.3479,
+          "rerank_reason": "term_overlap=bgc; metadata_bonus=0.10; base_similarity=0.5099"
+        }
+      ],
       "revisions": 0,
-      "latency_ms": 4.7,
+      "latency_ms": 20.2,
       "groundedness": null
     }
   ]

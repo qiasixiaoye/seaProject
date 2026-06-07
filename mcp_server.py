@@ -102,6 +102,39 @@ def _err(req_id: Any, code: int, message: str, data: Any = None) -> dict:
     return {"jsonrpc": "2.0", "id": req_id, "error": err}
 
 
+def _tool_error_payload(exc: Exception, tool_name: str) -> dict[str, Any]:
+    """Stable MCP tool error contract returned inside tools/call content."""
+    if isinstance(exc, ValueError):
+        code = "validation_error"
+        retryable = False
+    elif isinstance(exc, KeyError):
+        code = "not_found"
+        retryable = False
+    else:
+        code = "tool_execution_error"
+        retryable = True
+    return {
+        "code": code,
+        "message": str(exc) or type(exc).__name__,
+        "details": {
+            "tool": tool_name,
+            "exception": type(exc).__name__,
+        },
+        "retryable": retryable,
+    }
+
+
+def _trace_summary(trace: list[dict[str, Any]] | None) -> dict[str, Any]:
+    items = list(trace or [])
+    failed = [item for item in items if item.get("status") == "error" or item.get("error")]
+    return {
+        "node_count": len(items),
+        "nodes": [item.get("node") for item in items if item.get("node")],
+        "failed_count": len(failed),
+        "failed_nodes": [item.get("node") for item in failed if item.get("node")],
+    }
+
+
 # ── Tool definitions ──────────────────────────────────────────────────────────
 
 TOOLS: list[dict[str, Any]] = [
@@ -182,6 +215,11 @@ TOOLS: list[dict[str, Any]] = [
                     "default": "auto",
                 },
                 "top_k": {"type": "integer", "description": "检索文档数。", "default": 6},
+                "trace_summary": {
+                    "type": "boolean",
+                    "description": "是否返回压缩 trace 摘要，默认 false。",
+                    "default": False,
+                },
             },
             "required": ["question"],
         },
@@ -310,6 +348,7 @@ def _tool_run_ocean_report(args: dict) -> dict:
     question = str(args.get("question", "")).strip()
     if not question:
         raise ValueError("question is required")
+    include_trace_summary = bool(args.get("trace_summary", False))
     result = geo_graph.run(
         question=question,
         bbox=args.get("bbox"),
@@ -317,20 +356,24 @@ def _tool_run_ocean_report(args: dict) -> dict:
         backend=str(args.get("backend") or "auto"),
         top_k=int(args.get("top_k") or 6),
         max_revisions=1,
-        trace_enabled=False,
+        trace_enabled=include_trace_summary,
         use_parallel=True,
     )
     # 精简返回体（不传完整 trace，减少 token）
-    return {
+    payload = {
         "task_id":       result.get("task_id"),
         "domain":        result.get("domain"),
         "report":        result.get("report"),
         "risk_hypotheses": result.get("risk_hypotheses"),
         "critic_result": result.get("critic_result"),
+        "evaluation":    result.get("evaluation"),
         "backend_used":  result.get("backend_used"),
         "elapsed_ms":    result.get("elapsed_ms"),
         "token_usage":   result.get("token_usage"),
     }
+    if include_trace_summary:
+        payload["trace_summary"] = _trace_summary(result.get("trace", []))
+    return payload
 
 
 def _tool_list_datasets(args: dict) -> dict:
@@ -345,6 +388,8 @@ def _tool_list_datasets(args: dict) -> dict:
 def _tool_search_literature(args: dict) -> dict:
     from ocean_agents_demo import core
     query = str(args.get("query") or "").strip()
+    if not query:
+        raise ValueError("query is required")
     top_k = int(args.get("top_k") or 5)
     backend = str(args.get("backend") or "auto")
     docs, backend_used = core.retrieve(
@@ -355,15 +400,22 @@ def _tool_search_literature(args: dict) -> dict:
     return {
         "backend_used": backend_used,
         "count": len(docs),
-        "documents": [
-            {
-                "title":   getattr(d, "title",   str(d)[:60]),
-                "snippet": getattr(d, "snippet", ""),
-                "score":   getattr(d, "score",   None),
-                "source":  getattr(d, "source",  ""),
-            }
-            for d in docs
-        ],
+        "documents": [_literature_doc_payload(core, d) for d in docs],
+    }
+
+
+def _literature_doc_payload(core: Any, doc: Any) -> dict[str, Any]:
+    evidence = core.doc_to_evidence_dict(doc)
+    return {
+        "doc_id": evidence.get("doc_id"),
+        "chunk_id": evidence.get("chunk_id"),
+        "title": getattr(doc, "title", str(doc)[:60]),
+        "snippet": getattr(doc, "abstract", "")[:500],
+        "page": evidence.get("page"),
+        "source": getattr(doc, "source", ""),
+        "score": getattr(doc, "score", None),
+        "rerank_score": evidence.get("rerank_score"),
+        "rerank_reason": evidence.get("rerank_reason"),
     }
 
 
@@ -430,8 +482,9 @@ def handle_tools_call(req_id: Any, params: dict) -> dict:
         })
     except Exception as exc:
         log.error("Tool %s failed: %s\n%s", name, exc, traceback.format_exc())
+        payload = _tool_error_payload(exc, name)
         return _ok(req_id, {
-            "content": [{"type": "text", "text": f"Error: {exc}"}],
+            "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False, default=str)}],
             "isError": True,
         })
 

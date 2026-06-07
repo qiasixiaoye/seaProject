@@ -122,6 +122,7 @@ def doc_to_evidence_dict(doc: Doc) -> dict[str, Any]:
     data["evidence"] = evidence
     for key in (
         "doc_id", "chunk_id", "dataset_id", "document_name", "page", "pages",
+        "source_path", "schema_version", "backend", "route",
         "section", "section_path", "content_type", "rank_before", "rank_after",
         "rerank_score", "rerank_reason", "similarity", "vector_similarity",
         "term_similarity", "retrieval_query", "query_variant", "routes",
@@ -1278,6 +1279,7 @@ def topic_penalty(requested: str, doc: Doc) -> float:
 
 
 def report(intent: dict[str, Any], kept: list[Doc], passed: list[Doc], backend: str, extra_context: str = "") -> str:
+    evidence_labels = {doc.id: _evidence_label(doc, i) for i, doc in enumerate(kept, 1)}
     lines = [
         "# 海洋领域 RAG 多 Agent 分析报告",
         "",
@@ -1290,13 +1292,18 @@ def report(intent: dict[str, Any], kept: list[Doc], passed: list[Doc], backend: 
     ]
     all_text = " ".join(d.abstract for d in kept)
     if "酸化" in all_text:
-        lines.append("- 海洋酸化会削弱钙化生物壳体/骨骼形成能力，贝类养殖与珊瑚生态是重点风险对象。")
+        label = _first_matching_evidence_label(kept, evidence_labels, ["酸化", "贝类", "珊瑚"])
+        lines.append(f"- 海洋酸化会削弱钙化生物壳体/骨骼形成能力，贝类养殖与珊瑚生态是重点风险对象。{label}")
     if "热浪" in all_text:
-        lines.append("- 海洋热浪会放大珊瑚白化、物种迁移、食物网扰动和渔业波动风险。")
+        label = _first_matching_evidence_label(kept, evidence_labels, ["热浪", "珊瑚", "渔业"])
+        lines.append(f"- 海洋热浪会放大珊瑚白化、物种迁移、食物网扰动和渔业波动风险。{label}")
     if not kept:
         lines.append("- 当前知识库未检索到足够相关材料，需要补充文档或降低阈值。")
     lines += ["", "## 证据筛选", "| 文档 | 类型 | 年份 | 分数 |", "|---|---|---|---|"]
-    lines += [f"| {d.title} | {d.kind} | {d.year or '-'} | {d.decision_score:.3f} |" for d in kept]
+    lines += [
+        f"| {evidence_labels.get(d.id, '')} {d.title} | {d.kind} | {d.year or '-'} | {d.decision_score:.3f} |"
+        for d in kept
+    ]
     lines += ["", "## 规划建议"]
     lines += [
         "1. 建立主题化知识库：海洋酸化、海洋热浪、海平面、渔业治理分别建库或打标签。",
@@ -1307,10 +1314,39 @@ def report(intent: dict[str, Any], kept: list[Doc], passed: list[Doc], backend: 
     lines += ["", "## 被过滤文档"]
     lines += [f"- {d.title} ({d.decision_score:.3f})" for d in passed] or ["- 无"]
     lines += ["", "## 参考来源"]
-    lines += [f"- {d.title}: {d.source}" for d in kept]
+    lines += [f"- {evidence_labels.get(d.id, '')} {d.title}: {_source_with_page(d)}" for d in kept]
     if extra_context:
         lines += ["", "## 区域数值与风险假设", extra_context]
     return "\n".join(lines)
+
+
+def _evidence_label(doc: Doc, index: int) -> str:
+    evidence = (doc.metadata or {}).get("evidence") or {}
+    doc_id = evidence.get("doc_id") or doc.id
+    chunk_id = evidence.get("chunk_id") or doc.id
+    page = evidence.get("page")
+    page_text = f", p.{page}" if page else ""
+    return f"[E{index}: {doc_id}/{chunk_id}{page_text}]"
+
+
+def _source_with_page(doc: Doc) -> str:
+    evidence = (doc.metadata or {}).get("evidence") or {}
+    page = evidence.get("page")
+    if page:
+        return f"{doc.source} p.{page}"
+    return doc.source
+
+
+def _first_matching_evidence_label(
+    docs: list[Doc],
+    labels: dict[str, str],
+    terms: list[str],
+) -> str:
+    for doc in docs:
+        blob = f"{doc.title} {' '.join(doc.topics)} {doc.abstract}"
+        if any(term and term in blob for term in terms):
+            return " " + labels.get(doc.id, "")
+    return f" {next(iter(labels.values()), '')}" if labels else ""
 
 
 def llm_report(
@@ -1324,7 +1360,8 @@ def llm_report(
     if not deepseek_client.configured():
         return report(intent, kept, passed, backend, extra_context=extra_context)
     context = "\n\n".join(
-        f"[{i}] 标题：{doc.title}\n类型：{doc.kind}\n年份：{doc.year or '-'}\n来源：{doc.source}\n相关分：{doc.decision_score}\n摘要：{doc.abstract}"
+        f"{_evidence_label(doc, i)} 标题：{doc.title}\n类型：{doc.kind}\n年份：{doc.year or '-'}\n"
+        f"来源：{_source_with_page(doc)}\n相关分：{doc.decision_score}\n摘要：{doc.abstract}"
         for i, doc in enumerate(kept[:8], 1)
     )
     if not context:
@@ -1335,7 +1372,8 @@ def llm_report(
         f"检索后端：{backend}\n\n"
         f"通过筛选的证据：\n{context}\n\n"
         f"被过滤文档：{', '.join(d.title for d in passed) or '无'}\n\n"
-        "请生成一份海洋相关中文报告，保留文献/报告来源线索。"
+        "请生成一份海洋相关中文报告。每个核心结论必须显式引用证据标签（如 [E1: ...]），"
+        "证据不足时说明数据局限，不得给出无证据强结论。"
     )
     if extra_context:
         # 区域数值上下文 + DomainReasoningAgent 的风险假设。
@@ -1353,6 +1391,7 @@ def llm_report(
                 "你是海洋科学与海洋治理方向的中文研究助手。"
                 "必须基于给定证据回答，不能编造文献；证据不足时直接说明。"
                 "输出结构包含：问题凝练、证据判断、核心结论、风险与不确定性、规划建议、参考来源。"
+                "所有关键判断都要带证据标签。"
             ),
         },
         {"role": "user", "content": user_content},
@@ -1400,5 +1439,9 @@ def _linear_pipeline(question: str, top_k: int = 6, threshold: float = 0.22, bac
         "passed_documents": [doc_to_evidence_dict(d) for d in passed],
     }
     if trace:
-        result["trace"] = events
+        try:
+            from geo_agent.state import normalize_trace
+            result["trace"] = normalize_trace(events)
+        except Exception:
+            result["trace"] = events
     return result
