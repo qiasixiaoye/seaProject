@@ -2,9 +2,9 @@
   "metadata": {
     "backend": "local",
     "top_k": 6,
-    "commit_hash": "25de387",
-    "started_at_unix": 1780923171.06,
-    "elapsed_ms": 868.4,
+    "commit_hash": "70d983d",
+    "started_at_unix": 1780925541.559,
+    "elapsed_ms": 1271.6,
     "dataset": "eval\\dataset.jsonl",
     "report_json": "eval\\report.json",
     "report_md": "eval\\report.md"
@@ -22,7 +22,7 @@
     "avg_topic_recall": 0.5833,
     "avg_citation_coverage": 1.0,
     "avg_trace_completeness": 1.0,
-    "avg_latency_ms": 86.71,
+    "avg_latency_ms": 127.02,
     "avg_groundedness": null
   },
   "results": [
@@ -82,7 +82,7 @@
           "source": "https://www.nature.com/articles/s41558-019-0412-1",
           "score": 0.44,
           "rerank_score": 0.4578,
-          "rerank_reason": "term_overlap=heatwaves, marine, 海洋热浪, 海洋热, 洋热浪; metadata_bonus=0.25; base_similarity=0.4400"
+          "rerank_reason": "term_overlap=heatwaves, marine, 海洋热浪, 海洋热, and; metadata_bonus=0.25; base_similarity=0.4400"
         },
         {
           "rank": 3,
@@ -93,7 +93,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\marine_heatwave_rag_seed.md",
           "score": 0.4,
           "rerank_score": 0.426,
-          "rerank_reason": "term_overlap=marine, 海洋热浪, 海洋热, 洋热浪, 白化; metadata_bonus=0.35; base_similarity=0.4000"
+          "rerank_reason": "term_overlap=marine, 海洋热浪, 海洋热, 洋热浪, 洋热; metadata_bonus=0.35; base_similarity=0.4000"
         },
         {
           "rank": 4,
@@ -104,7 +104,7 @@
           "source": "https://www.fisheries.noaa.gov/insight/understanding-ocean-acidification",
           "score": 0.24,
           "rerank_score": 0.2588,
-          "rerank_reason": "term_overlap=fisheries, 珊瑚礁, 瑚礁, 渔业, 海洋; metadata_bonus=0.25; base_similarity=0.2400"
+          "rerank_reason": "term_overlap=fisheries, 珊瑚礁, 珊瑚, 瑚礁, 渔业; metadata_bonus=0.25; base_similarity=0.2400"
         },
         {
           "rank": 5,
@@ -115,7 +115,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\20_ibi_ocean_heat_content.pdf",
           "score": 0.12,
           "rerank_score": 0.1274,
-          "rerank_reason": "term_overlap=海洋热, 海洋, 洋热; metadata_bonus=0.10; base_similarity=0.1200"
+          "rerank_reason": "term_overlap=海洋热, 洋热, 海洋; metadata_bonus=0.10; base_similarity=0.1200"
         },
         {
           "rank": 6,
@@ -126,11 +126,11 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\28_global_ocean_heat_content.pdf",
           "score": 0.12,
           "rerank_score": 0.1274,
-          "rerank_reason": "term_overlap=海洋热, 海洋, 洋热; metadata_bonus=0.10; base_similarity=0.1200"
+          "rerank_reason": "term_overlap=海洋热, 洋热, 海洋; metadata_bonus=0.10; base_similarity=0.1200"
         }
       ],
       "revisions": 0,
-      "latency_ms": 267.6,
+      "latency_ms": 599.3,
       "groundedness": null
     },
     {
@@ -178,7 +178,7 @@
           "source": "https://www.fisheries.noaa.gov/insight/understanding-ocean-acidification",
           "score": 0.6255,
           "rerank_score": 0.6424,
-          "rerank_reason": "term_overlap=acidification, ocean, 海洋酸化, 贝类养殖, 类养殖; metadata_bonus=0.25; base_similarity=0.6255"
+          "rerank_reason": "term_overlap=acidification, ocean, 贝类养殖, 海洋酸化, 海洋酸; metadata_bonus=0.25; base_similarity=0.6255"
         },
         {
           "rank": 2,
@@ -189,7 +189,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\ocean_acidification_rag_seed.md",
           "score": 0.5838,
           "rerank_score": 0.6089,
-          "rerank_reason": "term_overlap=acidification, ocean, 海洋酸化, 贝类养殖, 类养殖; metadata_bonus=0.35; base_similarity=0.5838"
+          "rerank_reason": "term_overlap=acidification, ocean, 贝类养殖, 海洋酸化, 海洋酸; metadata_bonus=0.35; base_similarity=0.5838"
         },
         {
           "rank": 3,
@@ -237,7 +237,7 @@
         }
       ],
       "revisions": 0,
-      "latency_ms": 126.3,
+      "latency_ms": 136.1,
       "groundedness": null
     },
     {
@@ -285,7 +285,7 @@
           "source": "https://www.ipcc.ch/srocc/chapter/summary-for-policymakers/",
           "score": 0.4811,
           "rerank_score": 0.459,
-          "rerank_reason": "term_overlap=海平面上, 平面上升, 面上升, 海平面, 平面上; metadata_bonus=0.25; base_similarity=0.4811"
+          "rerank_reason": "term_overlap=海平面上, 平面上升, 平面上, 面上升, 海平面; metadata_bonus=0.25; base_similarity=0.4811"
         },
         {
           "rank": 2,
@@ -307,7 +307,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2019年中国海平面公报_b76facc7.pdf",
           "score": 0.1604,
           "rerank_score": 0.1544,
-          "rerank_reason": "term_overlap=海平面, 海平, 平面; metadata_bonus=0.10; base_similarity=0.1604"
+          "rerank_reason": "term_overlap=海平面, 平面, 海平; metadata_bonus=0.10; base_similarity=0.1604"
         },
         {
           "rank": 4,
@@ -318,7 +318,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2020年中国海平面公报_d79a1558.pdf",
           "score": 0.1604,
           "rerank_score": 0.1544,
-          "rerank_reason": "term_overlap=海平面, 海平, 平面; metadata_bonus=0.10; base_similarity=0.1604"
+          "rerank_reason": "term_overlap=海平面, 平面, 海平; metadata_bonus=0.10; base_similarity=0.1604"
         },
         {
           "rank": 5,
@@ -344,7 +344,7 @@
         }
       ],
       "revisions": 0,
-      "latency_ms": 64.9,
+      "latency_ms": 62.7,
       "groundedness": null
     },
     {
@@ -400,7 +400,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2009年中国近岸海域环境质量公报_aadf0abf.pdf",
           "score": 0.4243,
           "rerank_score": 0.367,
-          "rerank_reason": "term_overlap=近岸海域, 近岸海, 岸海域, 岸海, 近岸; metadata_bonus=0.10; base_similarity=0.4243"
+          "rerank_reason": "term_overlap=近岸海域, 岸海域, 近岸海, 近岸, 海域; metadata_bonus=0.10; base_similarity=0.4243"
         },
         {
           "rank": 2,
@@ -411,7 +411,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2010年中国近岸海域环境质量公报_93de906e.pdf",
           "score": 0.4243,
           "rerank_score": 0.367,
-          "rerank_reason": "term_overlap=近岸海域, 近岸海, 岸海域, 岸海, 近岸; metadata_bonus=0.10; base_similarity=0.4243"
+          "rerank_reason": "term_overlap=近岸海域, 岸海域, 近岸海, 近岸, 海域; metadata_bonus=0.10; base_similarity=0.4243"
         },
         {
           "rank": 3,
@@ -422,7 +422,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2011年中国近岸海域环境质量公报_485863d1.pdf",
           "score": 0.4243,
           "rerank_score": 0.367,
-          "rerank_reason": "term_overlap=近岸海域, 近岸海, 岸海域, 岸海, 近岸; metadata_bonus=0.10; base_similarity=0.4243"
+          "rerank_reason": "term_overlap=近岸海域, 岸海域, 近岸海, 近岸, 海域; metadata_bonus=0.10; base_similarity=0.4243"
         },
         {
           "rank": 4,
@@ -433,7 +433,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2012年中国近岸海域环境质量公报_f0e879c4.pdf",
           "score": 0.4243,
           "rerank_score": 0.367,
-          "rerank_reason": "term_overlap=近岸海域, 近岸海, 岸海域, 岸海, 近岸; metadata_bonus=0.10; base_similarity=0.4243"
+          "rerank_reason": "term_overlap=近岸海域, 岸海域, 近岸海, 近岸, 海域; metadata_bonus=0.10; base_similarity=0.4243"
         },
         {
           "rank": 5,
@@ -444,7 +444,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2014年中国近岸海域环境质量公报_d7cd2eb4.pdf",
           "score": 0.4243,
           "rerank_score": 0.367,
-          "rerank_reason": "term_overlap=近岸海域, 近岸海, 岸海域, 岸海, 近岸; metadata_bonus=0.10; base_similarity=0.4243"
+          "rerank_reason": "term_overlap=近岸海域, 岸海域, 近岸海, 近岸, 海域; metadata_bonus=0.10; base_similarity=0.4243"
         },
         {
           "rank": 6,
@@ -455,11 +455,11 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\cn\\2015年中国近岸海域环境质量公报_4b2bb7e8.pdf",
           "score": 0.4243,
           "rerank_score": 0.367,
-          "rerank_reason": "term_overlap=近岸海域, 近岸海, 岸海域, 岸海, 近岸; metadata_bonus=0.10; base_similarity=0.4243"
+          "rerank_reason": "term_overlap=近岸海域, 岸海域, 近岸海, 近岸, 海域; metadata_bonus=0.10; base_similarity=0.4243"
         }
       ],
       "revisions": 0,
-      "latency_ms": 63.1,
+      "latency_ms": 66.4,
       "groundedness": null
     },
     {
@@ -574,7 +574,7 @@
         }
       ],
       "revisions": 0,
-      "latency_ms": 56.2,
+      "latency_ms": 64.3,
       "groundedness": null
     },
     {
@@ -633,7 +633,7 @@
           "source": "https://www.nature.com/articles/s41586-018-0383-9",
           "score": 0.5068,
           "rerank_score": 0.5243,
-          "rerank_reason": "term_overlap=warming, marine, global, under, 生态系统; metadata_bonus=0.25; base_similarity=0.5068"
+          "rerank_reason": "term_overlap=warming, marine, global, under, 全球变暖; metadata_bonus=0.25; base_similarity=0.5068"
         },
         {
           "rank": 3,
@@ -644,7 +644,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\marine_heatwave_rag_seed.md",
           "score": 0.4174,
           "rerank_score": 0.4433,
-          "rerank_reason": "term_overlap=marine, 系统服务, 生态系统, 态系统服, 统服务; metadata_bonus=0.35; base_similarity=0.4174"
+          "rerank_reason": "term_overlap=marine, 系统服务, 态系统服, 生态系统, 系统服; metadata_bonus=0.35; base_similarity=0.4174"
         },
         {
           "rank": 4,
@@ -655,7 +655,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\knowledge_docs\\ocean_acidification_rag_seed.md",
           "score": 0.1193,
           "rerank_score": 0.1467,
-          "rerank_reason": "term_overlap=生态, 系统, 变化, 生物; metadata_bonus=0.35; base_similarity=0.1193"
+          "rerank_reason": "term_overlap=系统, 生态, 生物, 变化; metadata_bonus=0.35; base_similarity=0.1193"
         },
         {
           "rank": 5,
@@ -677,11 +677,11 @@
           "source": "https://www.ipcc.ch/srocc/chapter/summary-for-policymakers/",
           "score": 0.0894,
           "rerank_score": 0.109,
-          "rerank_reason": "term_overlap=气候, 生态, 系统; metadata_bonus=0.25; base_similarity=0.0894"
+          "rerank_reason": "term_overlap=系统, 生态, 气候; metadata_bonus=0.25; base_similarity=0.0894"
         }
       ],
       "revisions": 0,
-      "latency_ms": 107.5,
+      "latency_ms": 126.5,
       "groundedness": null
     },
     {
@@ -784,7 +784,7 @@
         }
       ],
       "revisions": 0,
-      "latency_ms": 26.2,
+      "latency_ms": 34.8,
       "groundedness": null
     },
     {
@@ -836,7 +836,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\06_baltic_north_sea_sst.pdf",
           "score": 0.4824,
           "rerank_score": 0.4485,
-          "rerank_reason": "term_overlap=海表温度, sea, 海表温, sst, 表温度; metadata_bonus=0.10; base_similarity=0.4824"
+          "rerank_reason": "term_overlap=海表温度, sea, 表温度, 海表温, sst; metadata_bonus=0.10; base_similarity=0.4824"
         },
         {
           "rank": 2,
@@ -847,7 +847,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\41_baltic_north_sea_sst_nrt.pdf",
           "score": 0.4824,
           "rerank_score": 0.4485,
-          "rerank_reason": "term_overlap=海表温度, sea, 海表温, sst, 表温度; metadata_bonus=0.10; base_similarity=0.4824"
+          "rerank_reason": "term_overlap=海表温度, sea, 表温度, 海表温, sst; metadata_bonus=0.10; base_similarity=0.4824"
         },
         {
           "rank": 3,
@@ -869,7 +869,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\33_atlantic_sst_nrt.pdf",
           "score": 0.4221,
           "rerank_score": 0.3934,
-          "rerank_reason": "term_overlap=海表温度, 海表温, sst, 表温度, 表温; metadata_bonus=0.10; base_similarity=0.4221"
+          "rerank_reason": "term_overlap=海表温度, 表温度, 海表温, sst, 海表; metadata_bonus=0.10; base_similarity=0.4221"
         },
         {
           "rank": 5,
@@ -880,7 +880,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\37_atlantic_sst_reprocessed.pdf",
           "score": 0.4221,
           "rerank_score": 0.3934,
-          "rerank_reason": "term_overlap=海表温度, 海表温, sst, 表温度, 表温; metadata_bonus=0.10; base_similarity=0.4221"
+          "rerank_reason": "term_overlap=海表温度, 表温度, 海表温, sst, 海表; metadata_bonus=0.10; base_similarity=0.4221"
         },
         {
           "rank": 6,
@@ -891,11 +891,11 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\45_mediterranean_sst_indicators.pdf",
           "score": 0.4221,
           "rerank_score": 0.3934,
-          "rerank_reason": "term_overlap=海表温度, 海表温, sst, 表温度, 表温; metadata_bonus=0.10; base_similarity=0.4221"
+          "rerank_reason": "term_overlap=海表温度, 表温度, 海表温, sst, 海表; metadata_bonus=0.10; base_similarity=0.4221"
         }
       ],
       "revisions": 0,
-      "latency_ms": 49.5,
+      "latency_ms": 58.9,
       "groundedness": null
     },
     {
@@ -1002,7 +1002,7 @@
         }
       ],
       "revisions": 0,
-      "latency_ms": 50.8,
+      "latency_ms": 60.8,
       "groundedness": null
     },
     {
@@ -1056,7 +1056,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\10_baltic_sea_physical___bgc.pdf",
           "score": 0.5965,
           "rerank_score": 0.5857,
-          "rerank_reason": "term_overlap=生物地球, 物地球化, 地球化学, bgc, 物地球; metadata_bonus=0.10; base_similarity=0.5965"
+          "rerank_reason": "term_overlap=物地球化, 地球化学, 生物地球, 物地球, 生物地; metadata_bonus=0.10; base_similarity=0.5965"
         },
         {
           "rank": 2,
@@ -1067,7 +1067,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\13_arctic_phy_ice_bgc.pdf",
           "score": 0.5965,
           "rerank_score": 0.5857,
-          "rerank_reason": "term_overlap=生物地球, 物地球化, 地球化学, bgc, 物地球; metadata_bonus=0.10; base_similarity=0.5965"
+          "rerank_reason": "term_overlap=物地球化, 地球化学, 生物地球, 物地球, 生物地; metadata_bonus=0.10; base_similarity=0.5965"
         },
         {
           "rank": 3,
@@ -1078,7 +1078,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\16_global_bgc_lmtl_biomass.pdf",
           "score": 0.5965,
           "rerank_score": 0.5857,
-          "rerank_reason": "term_overlap=生物地球, 物地球化, 地球化学, bgc, 物地球; metadata_bonus=0.10; base_similarity=0.5965"
+          "rerank_reason": "term_overlap=物地球化, 地球化学, 生物地球, 物地球, 生物地; metadata_bonus=0.10; base_similarity=0.5965"
         },
         {
           "rank": 4,
@@ -1089,7 +1089,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\18_ibi_bgc_forecast.pdf",
           "score": 0.5965,
           "rerank_score": 0.5857,
-          "rerank_reason": "term_overlap=生物地球, 物地球化, 地球化学, bgc, 物地球; metadata_bonus=0.10; base_similarity=0.5965"
+          "rerank_reason": "term_overlap=物地球化, 地球化学, 生物地球, 物地球, 生物地; metadata_bonus=0.10; base_similarity=0.5965"
         },
         {
           "rank": 5,
@@ -1100,7 +1100,7 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\24_ibi_multiyear_bgc.pdf",
           "score": 0.5965,
           "rerank_score": 0.5857,
-          "rerank_reason": "term_overlap=生物地球, 物地球化, 地球化学, bgc, 物地球; metadata_bonus=0.10; base_similarity=0.5965"
+          "rerank_reason": "term_overlap=物地球化, 地球化学, 生物地球, 物地球, 生物地; metadata_bonus=0.10; base_similarity=0.5965"
         },
         {
           "rank": 6,
@@ -1111,11 +1111,11 @@
           "source": "C:\\Users\\lmh\\Desktop\\海洋rag+多agent\\data\\pdf_reports\\en\\25_global_bgc_multiyear_hindcast.pdf",
           "score": 0.5965,
           "rerank_score": 0.5857,
-          "rerank_reason": "term_overlap=生物地球, 物地球化, 地球化学, bgc, 物地球; metadata_bonus=0.10; base_similarity=0.5965"
+          "rerank_reason": "term_overlap=物地球化, 地球化学, 生物地球, 物地球, 生物地; metadata_bonus=0.10; base_similarity=0.5965"
         }
       ],
       "revisions": 0,
-      "latency_ms": 55.0,
+      "latency_ms": 60.4,
       "groundedness": null
     }
   ]

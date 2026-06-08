@@ -153,6 +153,9 @@ Invoke-RestMethod http://127.0.0.1:8000/api/sync -Method Post
 ## API 摘要
 
 - `GET /api/project/status`：聚合项目状态，适合演示或排障。
+- `GET /api/data/assets`：查看已解析入库的数据资产清单和 parse metadata。
+- `POST /api/data/sync`：扫描本地 NetCDF / JSON / MAT / 文档资产并写入元数据表。
+- `POST /api/data/upload`：上传 `.nc` / `.json` / `.mat` 科学数据文件并立即生成标准化 metadata。
 - `GET /api/ocean/datasets`：返回 NetCDF 数据集、变量、分辨率、分类、推荐渲染模式。
 - `POST /api/ocean/query`：按 bbox 读取 NetCDF 切片，返回 grid/stats/render metadata/land mask 结果。
 - `GET /api/rag/status`：返回 LLM、本地知识库、RAGFlow 配置状态。

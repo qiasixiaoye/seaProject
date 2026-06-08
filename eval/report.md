@@ -4,7 +4,7 @@
 
 - backend: `local`
 - top_k: `6`
-- commit: `25de387`
+- commit: `70d983d`
 - samples: `10`
 - Recall@K: **0.7417**
 - Precision@K: **0.35**
@@ -12,7 +12,7 @@
 - nDCG@K: **N/A**
 - citation coverage: **1.0**
 - trace completeness: **1.0**
-- avg latency: **86.71 ms**
+- avg latency: **127.02 ms**
 
 ## Per-Question Details
 

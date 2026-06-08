@@ -16,18 +16,29 @@ from geo_agent import graph as geo_graph
 from geo_agent.catalog import agent_card, agent_catalog
 from ocean_agents_demo import deepseek_client
 from ocean_agents_demo.core import clear_doc_cache, rag_status, run_pipeline
+from ocean_agents_demo.ingestion import (
+    SUPPORTED_DATA_EXTS,
+    ingestion_summary,
+    init_metadata_db,
+    list_asset_records,
+    parse_asset,
+    scan_and_ingest,
+    upsert_asset_record,
+)
 from ocean_agents_demo.nc_data import dataset_summary, query_grid
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.getenv("OCEAN_DATA_DIR", ROOT / "data"))
 NC_DIR = DATA_DIR / "nc_uploads"
+DATA_UPLOAD_DIR = DATA_DIR / "data_uploads"
 PDF_DIR = DATA_DIR / "pdf_reports"
 KNOWLEDGE_DIR = DATA_DIR / "knowledge_docs"
 INSTANCE_DIR = Path(os.getenv("OCEAN_INSTANCE_DIR", ROOT / "instance"))
 DB_PATH = INSTANCE_DIR / "ocean_demo.sqlite3"
 
 ALLOWED_UPLOAD_EXTS = {".pdf", ".md", ".txt", ".json"}
+ALLOWED_DATA_UPLOAD_EXTS = SUPPORTED_DATA_EXTS
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
@@ -54,6 +65,7 @@ def create_app() -> Flask:
     def project_status() -> Any:
         rag = rag_status()
         ocean = dataset_summary()
+        ingestion = ingestion_summary(DB_PATH)
         return jsonify({
             "service": "ocean-digital-earth-rag",
             "status": "ok",
@@ -69,6 +81,8 @@ def create_app() -> Flask:
             },
             "data": {
                 "netcdf_datasets": len(ocean.get("datasets", [])),
+                "ingested_assets": ingestion["asset_count"],
+                "ingested_by_kind": ingestion["by_kind"],
                 "knowledge_documents": rag["local"]["document_count"],
                 "data_dir": str(DATA_DIR),
                 "database": str(DB_PATH),
@@ -78,11 +92,70 @@ def create_app() -> Flask:
     @app.get("/api/datasets")
     def datasets() -> Any:
         scanned = sync_files()
-        return jsonify({"files": scanned, "netcdf": dataset_summary()})
+        return jsonify({
+            "files": scanned,
+            "netcdf": dataset_summary(),
+            "ingestion": ingestion_summary(DB_PATH),
+        })
 
     @app.get("/api/ocean/datasets")
     def ocean_datasets() -> Any:
         return jsonify(dataset_summary())
+
+    @app.get("/api/data/assets")
+    def data_assets() -> Any:
+        limit = int(request.args.get("limit", 200))
+        return jsonify({
+            "summary": ingestion_summary(DB_PATH),
+            "assets": list_asset_records(DB_PATH, limit=limit),
+        })
+
+    @app.post("/api/data/sync")
+    def data_sync() -> Any:
+        records = scan_and_ingest(db_path=DB_PATH)
+        log_query("data_sync", {"count": len(records)})
+        return jsonify({
+            "success": True,
+            "count": len(records),
+            "summary": ingestion_summary(DB_PATH),
+            "assets": records,
+        })
+
+    @app.post("/api/data/upload")
+    def data_upload() -> Any:
+        """Upload scientific data files and immediately register parse metadata."""
+        if "file" not in request.files:
+            return jsonify({"error": "No file part in request"}), 400
+        f = request.files["file"]
+        if not f.filename:
+            return jsonify({"error": "Empty filename"}), 400
+
+        filename = secure_filename(f.filename)
+        ext = Path(filename).suffix.lower()
+        if ext not in ALLOWED_DATA_UPLOAD_EXTS:
+            return jsonify({
+                "error": f"File type '{ext}' not allowed. Supported: {sorted(ALLOWED_DATA_UPLOAD_EXTS)}"
+            }), 400
+
+        dest_dir = NC_DIR if ext == ".nc" else DATA_UPLOAD_DIR
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        save_path = _unique_path(dest_dir / filename)
+
+        f.stream.seek(0, 2)
+        size = f.stream.tell()
+        f.stream.seek(0)
+        if size > MAX_UPLOAD_BYTES:
+            return jsonify({"error": f"File too large ({size} bytes, max {MAX_UPLOAD_BYTES})"}), 413
+
+        f.save(str(save_path))
+        record = parse_asset(save_path)
+        upsert_asset_record(record, DB_PATH)
+        log_query("data_upload", {"filename": filename, "dest": str(save_path), "size": size, "status": record["status"]})
+        return jsonify({
+            "success": True,
+            "asset": record,
+            "summary": ingestion_summary(DB_PATH),
+        })
 
     @app.post("/api/ocean/query")
     def ocean_query() -> Any:
@@ -350,8 +423,10 @@ def create_app() -> Flask:
 def init_db() -> None:
     INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
     NC_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     PDF_DIR.mkdir(parents=True, exist_ok=True)
     KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+    init_metadata_db(DB_PATH)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS query_log (
@@ -390,6 +465,16 @@ def sync_files() -> list[dict]:
                 "dir": str(directory),
             })
     return results
+
+
+def _unique_path(path: Path) -> Path:
+    stem, suffix = path.stem, path.suffix
+    out = path
+    counter = 1
+    while out.exists():
+        out = path.parent / f"{stem}_{counter}{suffix}"
+        counter += 1
+    return out
 
 
 def _safe_payload(payload: dict) -> dict:
