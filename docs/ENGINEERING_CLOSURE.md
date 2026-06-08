@@ -8,7 +8,7 @@ the current Ocean Digital Earth RAG multi-agent project.
 | Resume point | Implementation location | Current closure |
 | --- | --- | --- |
 | Multi-Agent orchestration | `ocean_agents_demo/agents.py`, `geo_agent/graph.py`, `geo_agent/nodes/*` | Intent, Planner, Retrieval, Context/Data, Screening, Reasoning, Visualization, Report, Critic, Evaluator are wired. LangGraph is used when installed; otherwise deterministic linear or parallel fallback runs the same state contract. |
-| RAG retrieval and evidence chain | `ocean_agents_demo/core.py`, `geo_agent/nodes/retrieval.py`, `geo_agent/nodes/screening.py` | RAGFlow-first retrieval falls back to local JSON/Markdown/PDF metadata. Retrieved docs are normalized through `EvidenceChunk` fields: `doc_id`, `chunk_id`, `page/pages`, `source`, `source_path`, rank, score, rerank reason, route and backend. |
+| RAG retrieval and evidence chain | `ocean_agents_demo/core.py`, `geo_agent/nodes/retrieval.py`, `geo_agent/nodes/screening.py` | RAGFlow-first retrieval falls back to local JSON/Markdown/PDF metadata. Local retrieval now supports configurable embedding scoring (`OCEAN_EMBEDDING_BACKEND=hash|keyword|sentence_transformers`) and records `keyword_score`, `embedding_score`, `vector_similarity`, route and backend. Retrieved docs are normalized through `EvidenceChunk` fields: `doc_id`, `chunk_id`, `page/pages`, `source`, `source_path`, rank, score and rerank reason. |
 | MCP tool service | `mcp_server.py`, `scripts/test_mcp_stdio.py` | MCP stdio exposes `query_ocean_data`, `search_literature`, `run_ocean_report`, and `list_datasets`. Tool errors use `{code,message,details,retryable}`. Smoke tests cover tool listing, compact data query, invalid bbox, literature search and report generation. |
 | Offline evaluation | `eval/run_eval.py`, `eval/dataset.jsonl`, `eval/report.json`, `eval/report.md` | Dataset rows include `relevant_documents` and `relevant_chunks`. Evaluation computes Recall@K, Precision@K, MRR and optional nDCG@K, plus citation coverage, trace schema completeness, missed gold and top retrieved evidence. Metadata records backend, top_k, commit hash and run time. |
 | Trace observability | `geo_agent/state.py`, `geo_agent/nodes/evaluator.py`, `geo_agent/graph.py` | Final GeoAgent traces normalize every node to `node/mode/status/elapsed_ms/input_summary/output_summary/error`. Evaluator reports trace node coverage, trace schema completeness and tool success rate. |
@@ -23,6 +23,14 @@ the current Ocean Digital Earth RAG multi-agent project.
 - Core files are expected to compile with:
   `python -m py_compile ocean_agents_demo/core.py geo_agent/graph.py geo_agent/state.py mcp_server.py eval/run_eval.py`.
 - Local mode does not require `DEEPSEEK_API_KEY` or a running RAGFlow instance.
+- Local embedding retrieval defaults to `OCEAN_EMBEDDING_BACKEND=hash`, a
+  deterministic n-gram feature hashing model. It is intentionally dependency
+  free so the backend container still starts without downloading model weights.
+  Setting `OCEAN_EMBEDDING_BACKEND=keyword` disables vector scoring. Setting
+  `OCEAN_EMBEDDING_BACKEND=sentence_transformers` and
+  `OCEAN_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+  enables a real multilingual embedding model when that optional package and
+  weights are installed.
 
 ## Known Limits
 

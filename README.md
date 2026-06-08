@@ -111,12 +111,17 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 RAGFLOW_BASE_URL=http://host.docker.internal:9380
 RAGFLOW_API_KEY=...
 RAGFLOW_DATASET_IDS=dataset_id_1,dataset_id_2
+
+OCEAN_EMBEDDING_BACKEND=hash
+OCEAN_EMBEDDING_MODEL=local-hash-ngram-v1
+OCEAN_EMBEDDING_WEIGHT=0.42
 ```
 
 说明：
 
 - DeepSeek 用于 Intent、Screening、Report、Critic。
 - RAGFlow 未配置时，系统自动回退到 `data/ocean_knowledge.json`、`data/knowledge_docs/`、`data/pdf_reports/` 的本地检索。
+- 本地检索默认启用离线 hash/ngram embedding，与关键词分数做 hybrid fusion；`OCEAN_EMBEDDING_BACKEND=keyword` 可关闭向量分数，`sentence_transformers` 可在安装可选依赖和模型权重后启用真实多语种 embedding。
 - `.env` 已加入 `.gitignore`，不要提交真实 Key。
 
 ## 数据目录

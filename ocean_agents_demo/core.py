@@ -6,6 +6,8 @@ import math
 import os
 import re
 import time
+import hashlib
+import importlib.util
 from dataclasses import dataclass, asdict, field
 from functools import lru_cache
 from html import unescape
@@ -905,15 +907,170 @@ def _compact_text(text: str, limit: int) -> str:
 
 def local_retrieve(query: str, top_k: int) -> list[Doc]:
     q = tokenize(query)
+    embed_cfg = embedding_config()
+    query_vector = _embed_text(query, embed_cfg)
+    embedding_active = query_vector is not None
     docs = []
     for doc in load_docs():
-        d = tokenize(doc.title + " " + " ".join(doc.topics) + " " + doc.abstract)
+        text = doc.title + " " + " ".join(doc.topics) + " " + doc.abstract
+        d = tokenize(text)
         overlap = q & d
-        doc.score = min(1.0, len(overlap) / max(1.0, math.sqrt(len(q)) * 5))
+        keyword_score = min(1.0, len(overlap) / max(1.0, math.sqrt(len(q)) * 5))
+        embedding_score = 0.0
+        if embedding_active:
+            doc_vector = _embed_text(text, embed_cfg)
+            if doc_vector is not None:
+                embedding_score = _cosine_similarity(query_vector, doc_vector)
+        doc.score = _combine_local_scores(keyword_score, embedding_score, embed_cfg)
         if doc.score:
+            meta = dict(doc.metadata or {})
+            meta.update({
+                "retrieval_mode": "local_hybrid" if embedding_active else "local_keyword",
+                "embedding_backend": embed_cfg["backend"],
+                "embedding_model": embed_cfg["model"],
+                "embedding_available": embedding_active,
+                "keyword_score": round(keyword_score, 4),
+                "embedding_score": round(embedding_score, 4),
+                "similarity": round(doc.score, 4),
+                "vector_similarity": round(embedding_score, 4) if embedding_active else None,
+                "term_similarity": round(keyword_score, 4),
+            })
+            doc.metadata = meta
             docs.append(doc)
     ranked = sorted(docs, key=lambda d: d.score, reverse=True)[:top_k]
-    return enrich_evidence_metadata(ranked, route="local_keyword")
+    route = "local_hybrid" if embedding_active else "local_keyword"
+    return enrich_evidence_metadata(ranked, route=route)
+
+
+def embedding_config() -> dict[str, Any]:
+    backend = os.getenv("OCEAN_EMBEDDING_BACKEND", "hash").strip().lower() or "hash"
+    if backend in {"off", "none"}:
+        backend = "keyword"
+    model = os.getenv("OCEAN_EMBEDDING_MODEL", "").strip()
+    if backend == "hash":
+        model = model or "local-hash-ngram-v1"
+        available = True
+        reason = "deterministic local feature hashing"
+    elif backend == "sentence_transformers":
+        model = model or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        available = importlib.util.find_spec("sentence_transformers") is not None
+        reason = "sentence_transformers installed" if available else "sentence_transformers package not installed"
+    elif backend == "keyword":
+        model = model or "keyword-only"
+        available = False
+        reason = "embedding disabled; keyword scoring only"
+    else:
+        model = model or backend
+        available = False
+        reason = f"unsupported embedding backend: {backend}"
+        backend = "keyword"
+    return {
+        "backend": backend,
+        "model": model,
+        "available": available,
+        "reason": reason,
+        "dimension": _embedding_dim(),
+        "weight": _embedding_weight(),
+    }
+
+
+def embedding_status() -> dict[str, Any]:
+    cfg = embedding_config()
+    return {
+        "backend": cfg["backend"],
+        "model": cfg["model"],
+        "available": cfg["available"],
+        "dimension": cfg["dimension"],
+        "weight": cfg["weight"],
+        "reason": cfg["reason"],
+    }
+
+
+def _embedding_dim() -> int:
+    try:
+        return max(64, min(4096, int(os.getenv("OCEAN_EMBEDDING_DIM", "384"))))
+    except ValueError:
+        return 384
+
+
+def _embedding_weight() -> float:
+    try:
+        return max(0.0, min(0.9, float(os.getenv("OCEAN_EMBEDDING_WEIGHT", "0.42"))))
+    except ValueError:
+        return 0.42
+
+
+def _embed_text(text: str, cfg: dict[str, Any]) -> dict[int, float] | None:
+    if not cfg.get("available"):
+        return None
+    if cfg.get("backend") == "hash":
+        return _hash_embedding(text, int(cfg.get("dimension") or 384))
+    if cfg.get("backend") == "sentence_transformers":
+        return _sentence_transformer_embedding(text, cfg)
+    return None
+
+
+def _hash_embedding(text: str, dim: int) -> dict[int, float]:
+    return dict(_hash_embedding_cached(str(text or "")[:5000], dim))
+
+
+@lru_cache(maxsize=8192)
+def _hash_embedding_cached(text: str, dim: int) -> tuple[tuple[int, float], ...]:
+    vec: dict[int, float] = {}
+    for term in _embedding_terms(text):
+        digest = hashlib.blake2b(term.encode("utf-8", errors="ignore"), digest_size=8).digest()
+        value = int.from_bytes(digest, "little", signed=False)
+        index = value % dim
+        sign = 1.0 if (value >> 63) == 0 else -1.0
+        weight = 1.0 + min(len(term), 12) / 24.0
+        vec[index] = vec.get(index, 0.0) + sign * weight
+    norm = math.sqrt(sum(v * v for v in vec.values()))
+    if norm <= 0:
+        return tuple()
+    return tuple(sorted((k, v / norm) for k, v in vec.items()))
+
+
+def _embedding_terms(text: str) -> list[str]:
+    base = list(tokenize(text))
+    lower = str(text or "").lower()
+    words = re.findall(r"[a-z][a-z0-9+-]{2,}", lower)
+    terms = [*base, *words]
+    for word in words:
+        for n in (3, 4):
+            terms.extend(word[i : i + n] for i in range(max(0, len(word) - n + 1)))
+    return [term for term in terms if len(term) >= 2]
+
+
+def _sentence_transformer_embedding(text: str, cfg: dict[str, Any]) -> dict[int, float] | None:
+    try:
+        model = _sentence_transformer_model(str(cfg.get("model") or ""))
+        values = model.encode([text], normalize_embeddings=True)[0]
+    except Exception:
+        return None
+    return {idx: float(value) for idx, value in enumerate(values) if float(value)}
+
+
+@lru_cache(maxsize=2)
+def _sentence_transformer_model(model_name: str) -> Any:
+    from sentence_transformers import SentenceTransformer  # type: ignore
+    return SentenceTransformer(model_name)
+
+
+def _cosine_similarity(left: dict[int, float], right: dict[int, float]) -> float:
+    if not left or not right:
+        return 0.0
+    if len(left) > len(right):
+        left, right = right, left
+    score = sum(value * right.get(index, 0.0) for index, value in left.items())
+    return max(0.0, min(1.0, score))
+
+
+def _combine_local_scores(keyword_score: float, embedding_score: float, cfg: dict[str, Any]) -> float:
+    if not cfg.get("available"):
+        return keyword_score
+    weight = float(cfg.get("weight") or 0.42)
+    hybrid = (1.0 - weight) * keyword_score + weight * embedding_score
+    return round(min(1.0, max(keyword_score, hybrid)), 4)
 
 
 def rag_status() -> dict[str, Any]:
@@ -949,6 +1106,7 @@ def rag_status() -> dict[str, Any]:
             "chunk_profiles": {
                 name: asdict(profile) for name, profile in DEFAULT_CHUNK_PROFILES.items()
             },
+            "embedding": embedding_status(),
             "pdf_parse_on_load": os.getenv("OCEAN_PARSE_PDF_ON_LOAD", "").lower() == "true",
             "documents": [{"id": doc.id, "title": doc.title, "kind": doc.kind, "source": doc.source} for doc in docs],
         },
@@ -1324,6 +1482,7 @@ def retrieve_with_info(intent: dict[str, Any], top_k: int, backend: str) -> tupl
             "method": "best_score_then_heuristic_rerank",
             "input_count": len(candidates),
             "output_count": len(reranked),
+            "local_embedding": embedding_status(),
         },
     }
     return reranked, backend_used, info
