@@ -288,15 +288,50 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
                 "token_usage": {},
             }
 
-            state.update(intent_node.run(state))
+            def _emit_trace(prev_len: int, elapsed_ms=None) -> None:
+                """实时推送 state['trace'] 中新增的节点条目（带耗时）。"""
+                tr = state.get("trace", [])
+                if elapsed_ms is not None:
+                    for i in range(prev_len, len(tr)):
+                        if isinstance(tr[i], dict) and tr[i].get("elapsed_ms") is None:
+                            tr[i]["elapsed_ms"] = elapsed_ms
+                for item in normalize_trace(tr)[prev_len:]:
+                    sse({"type": "trace", "item": item})
+
+            def _run_timed(node_run):
+                """运行单个节点，计时并实时推送其 trace 条目。"""
+                prev_len = len(state.get("trace", []))
+                t0 = time.time()
+                result = node_run(state)
+                state.update(result)
+                _emit_trace(prev_len, round((time.time() - t0) * 1000, 2))
+                return result
+
+            _run_timed(intent_node.run)
             sse({"type": "domain", "content": state.get("domain", "general")})
             sse({"type": "intent", "content": state.get("intent", {})})
 
-            state.update(planner_node.run(state))
+            # 非分析类输入（问候/闲聊/求助）：直接给引导回复，不跑检索/报告
+            if state.get("intent", {}).get("intent_type") == "chitchat":
+                reply = state["intent"].get("smalltalk_reply") or "你好！我可以帮你做海洋分析。"
+                sse({"type": "token", "content": reply})
+                sse({"type": "done",
+                     "elapsed_ms": round((time.time() - started) * 1000, 2),
+                     "token_usage": geo_llm.get_usage(),
+                     "domain": state.get("domain", "general"),
+                     "trace": normalize_trace(state.get("trace", [])),
+                     "evaluation": {},
+                     "revisions": 0,
+                     "chitchat": True})
+                return
+
+            _run_timed(planner_node.run)
             sse({"type": "planner", "content": state.get("execution_plan", {})})
 
-            # 并行 retrieval + context
+            # 并行 retrieval + context（整体计时后统一推送）
             import concurrent.futures
+            par_prev = len(state.get("trace", []))
+            par_t0 = time.time()
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 fut_ret = executor.submit(ret_node.run, state)
                 fut_ctx = executor.submit(ctx_node.run, state)
@@ -310,16 +345,18 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
             state.update(ret_result)
             state.update(ctx_result)
             state["trace"] = merged_trace
-            state.update(data_node.run(state))
+            _emit_trace(par_prev, round((time.time() - par_t0) * 1000, 2))
+
+            _run_timed(data_node.run)
             sse({"type": "context", "content": {
                 "candidates": len(state.get("candidates", [])),
                 "ocean_vars": len(state.get("ocean_data", {}).get("variables", [])),
                 "data_context": state.get("data_context", {}),
             }})
 
-            state.update(scr_node.run(state))
-            state.update(reas_node.run(state))
-            state.update(vis_node.run(state))
+            _run_timed(scr_node.run)
+            _run_timed(reas_node.run)
+            _run_timed(vis_node.run)
             sse({"type": "analysis", "content": {
                 "domain_analysis": state.get("domain_analysis", {}),
                 "risk_hypotheses": state.get("risk_hypotheses", []),
@@ -331,6 +368,8 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
 
             # Phase 2: 流式生成报告
             from geo_agent.nodes import report as report_node
+            rep_prev = len(state.get("trace", []))
+            rep_t0 = time.time()
             full_report = []
             for token in report_node.stream(state):
                 full_report.append(token)
@@ -341,11 +380,13 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
                 "mode": "stream",
                 "chars": len(state["report"]),
                 "revisions": state.get("revisions", 0),
+                "elapsed_ms": round((time.time() - rep_t0) * 1000, 2),
             }]
+            _emit_trace(rep_prev)
 
             # Phase 3: Critic
             from geo_agent.nodes import critic as critic_node
-            state.update(critic_node.run(state))
+            _run_timed(critic_node.run)
 
             # Critic 反思循环（流式修订）
             while (
@@ -356,6 +397,8 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
                     "revision": state["revisions"] + 1,
                     "feedback": state["critic_result"].get("feedback", ""),
                 }})
+                rev_prev = len(state.get("trace", []))
+                rev_t0 = time.time()
                 full_report = []
                 for token in report_node.stream(state, feedback=state["critic_result"].get("feedback")):
                     full_report.append(token)
@@ -368,12 +411,14 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
                     "revised": True,
                     "chars": len(state["report"]),
                     "revisions": state.get("revisions", 0),
+                    "elapsed_ms": round((time.time() - rev_t0) * 1000, 2),
                 }]
-                state.update(critic_node.run(state))
+                _emit_trace(rev_prev)
+                _run_timed(critic_node.run)
 
             # 完成
             from geo_agent.nodes import evaluator as evaluator_node
-            state.update(evaluator_node.run(state))
+            _run_timed(evaluator_node.run)
             elapsed = round((time.time() - started) * 1000, 2)
             token_usage = geo_llm.get_usage()
             evaluation = _attach_system_metrics(

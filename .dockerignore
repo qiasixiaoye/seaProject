@@ -11,6 +11,14 @@ geoserver_data
 instance
 logs
 文档下载+nc下载
+
+# 离线迁移打包产物（巨大，绝不能进构建上下文）
+docker_deploy
+docker_deploy.zip
+image-tars
+*.tar
+*.tar.gz
+.git
 data/pdf_reports/**/*.pdf
 data/pdf_reports/*.pdf
 

@@ -325,7 +325,7 @@ createApp({
     healthText:'服务状态检查中…',
     variableList:[],selectedVar:'',
     renderMode:'heatmap',stepVal:0,maxPoints:9000,
-    selectMode:false,selection:{west:119,east:122,south:23,north:26},
+    selectMode:false,selection:{west:119,east:122,south:23,north:26},userSelected:false,
     gridData:null,cesiumEntity:null,selectionEntity:null,olLayer:null,
     stats:null,vmin:'-',vmax:'-',legendCssStr:'',
     layerOpacity:0.82,queryLoading:false,
@@ -336,7 +336,7 @@ createApp({
     messages:[{role:'ai',text:'可以询问海洋热浪、酸化、渔业风险，框选区域后 AI 会自动获取数据。'}],
     domain:'auto',question:'请结合海表温度和海洋热浪知识，评估目标海域对珊瑚礁和渔业的风险，并形成规划建议',
     backend:'auto',topk:6,streaming:false,streamEs:null,
-    agentTrace:[],agentSummary:null,agentSummaryHtml:'',evidence:[],
+    agentTrace:[],agentSummary:null,agentSummaryHtml:'',evidence:[],exportingPdf:false,
     evaluation:null,
     geoApiReady:false,
     pipelineSteps:{intent:'',planner:'',retrieval:'',context:'',reasoning:'',visualization:'',report:'',evaluator:''},
@@ -377,6 +377,18 @@ createApp({
         {label:'工具',value:tools.tool_call_count??0,sub:tools.tool_success_rate==null?'未记录':this._pct(tools.tool_success_rate)},
         {label:'耗时',value:sys.elapsed_ms?`${(sys.elapsed_ms/1000).toFixed(1)}s`:'-',sub:`tokens ${sys.token_usage?.total_tokens??0}`},
       ];
+    },
+    regionLabel(){
+      const s=this.selection;
+      const f=n=>(+n).toFixed(1);
+      if(!s) return '默认 119–122°E, 23–26°N';
+      return `${f(s.west)}–${f(s.east)}°E, ${f(s.south)}–${f(s.north)}°N`+(this.userSelected?'':' · 默认');
+    },
+    regionTitle(){return this.userSelected?'本次分析使用你框选的区域，经纬度已传入 agent':'尚未框选，使用默认海域（台湾海峡）。可在地球上点「框选」后再提问';},
+    evidenceKept(){return this.evidence.filter(d=>d.verdict==='keep').length;},
+    totalElapsed(){
+      const ms=this.agentTrace.reduce((a,t)=>a+(Number(t.elapsed_ms)||0),0);
+      return ms>0?`${(ms/1000).toFixed(1)}s`:'—';
     },
   },
 
@@ -575,6 +587,7 @@ createApp({
     },
     setSelection(a,b){
       this.selection={west:Math.min(a.lon,b.lon),east:Math.max(a.lon,b.lon),south:Math.min(a.lat,b.lat),north:Math.max(a.lat,b.lat)};
+      this.userSelected=true;
       const s=this.selection;
       this.oceanStatus=`已框选：${s.west.toFixed(1)}°–${s.east.toFixed(1)}°E，${s.south.toFixed(1)}°–${s.north.toFixed(1)}°N`;
       this._drawSelectionRect(s);
@@ -731,7 +744,7 @@ createApp({
       if(this.selectionEntity)_viewer.entities.remove(this.selectionEntity);
       this.cesiumEntity=null;this.selectionEntity=null;
       if(this.olLayer)_olMap.removeLayer(this.olLayer);
-      this.olLayer=null;this.gridData=null;this.stats=null;this.selection=null;
+      this.olLayer=null;this.gridData=null;this.stats=null;this.selection=null;this.userSelected=false;
       this.vmin='-';this.vmax='-';this.legendCssStr='';this.oceanStatus='已清除。';
     },
 
@@ -752,6 +765,9 @@ createApp({
       if(this.streamEs)this.streamEs.close();
       const es=new EventSource(`/geo-api/api/geo/stream?${params}`);
       this.streamEs=es;
+      if(!this.userSelected){
+        this.messages.push({role:'ai',html:'<em>未框选区域，使用默认海域（台湾海峡 119–122°E, 23–26°N）。在地球上点「框选」拖拽后再提问，即可针对你框的区域分析。</em>'});
+      }
       let buf='';
       const msgIdx=this.messages.length;
       this.messages.push({role:'ai',html:'<span class="cursor">▋</span>'});
@@ -772,6 +788,14 @@ createApp({
             ...kept.map(x=>({verdict:'keep',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3)})),
             ...passed.map(x=>({verdict:'pass',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3)})),
           ];
+        }
+        else if(type==='trace'){
+          if(msg.item){
+            const idx=msg.item.index;
+            const ex=(idx!=null)?this.agentTrace.findIndex(t=>t.index===idx):-1;
+            if(ex>=0) this.agentTrace.splice(ex,1,msg.item);
+            else this.agentTrace.push(msg.item);
+          }
         }
         else if(type==='token'){buf+=(d||c||'');upd();}
         else if(type==='done'){
@@ -825,6 +849,161 @@ createApp({
     escapeHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');},
     _pct(v){return v==null?'-':`${Math.round(Number(v)*100)}%`;},
     renderSuggestions(){},
+    nodeLabel(n){
+      return {IntentNode:'意图解析',PlannerNode:'任务规划',RetrievalNode:'知识检索',
+        ContextNode:'海洋数据',DataAgent:'数据质检',ScreeningNode:'证据筛选',
+        ReasoningNode:'领域推理',VisualizationAgent:'可视化建议',ReportNode:'报告生成',
+        CriticNode:'质量审查',EvaluatorAgent:'综合评测'}[n]||n;
+    },
+    traceSummary(t){
+      if(t.error) return '错误：'+t.error;
+      const o=t.output_summary||{}, d=t.details||{}, p=[];
+      const arr=v=>Array.isArray(v)?v:[];
+      switch(t.node){
+        case 'IntentNode':
+          if(o.domain) p.push('领域 '+o.domain);
+          if(o.intent_type) p.push(o.intent_type);
+          if(arr(o.variables).length) p.push('变量 '+o.variables.join('/'));
+          if(o.query_variants) p.push('查询改写×'+o.query_variants);
+          break;
+        case 'PlannerNode':
+          if(arr(o.variables).length) p.push('规划变量 '+o.variables.join('/'));
+          break;
+        case 'RetrievalNode':
+          if(o.count!=null) p.push('候选 '+o.count+' 篇');
+          if(o.backend) p.push(o.backend);
+          if(arr(o.queries).length) p.push('查询×'+o.queries.length);
+          break;
+        case 'ContextNode':
+          if(arr(o.vars_queried).length) p.push('NC变量 '+o.vars_queried.join('/'));
+          if(o.vars_ok!=null) p.push('命中 '+o.vars_ok);
+          if(arr(o.vars_missing).length) p.push('缺失 '+o.vars_missing.join('/'));
+          if(t.mode==='skipped') p.push('跳过：'+(d.reason||'无 bbox'));
+          break;
+        case 'DataAgent':
+          p.push(arr(d.quality_flags).length?('数据告警 '+d.quality_flags.length+' 项'):'数值质量校验通过');
+          break;
+        case 'ScreeningNode':
+          p.push('保留 '+(o.kept??0)+' · 略过 '+(o.passed??0));
+          if(t.mode) p.push(t.mode==='llm'?'LLM 判定':t.mode==='heuristic'?'启发式':t.mode);
+          break;
+        case 'ReasoningNode':
+          if(o.domain) p.push(o.domain+' 推理');
+          if(d.risk_count!=null) p.push('风险假设 '+d.risk_count);
+          break;
+        case 'VisualizationAgent':
+          if(o.layers!=null) p.push('图层 '+o.layers);
+          if(o.warnings) p.push('告警 '+o.warnings);
+          break;
+        case 'ReportNode':
+          if(o.chars!=null) p.push('字数 '+o.chars);
+          if(d.revised) p.push('按反馈修订');
+          if(o.revisions) p.push('修订 '+o.revisions+' 次');
+          break;
+        case 'CriticNode':
+          p.push(o.passed?'✓ 质检通过':'✗ 质检未通过');
+          if(d.issues_count) p.push('问题 '+d.issues_count+' 项');
+          break;
+        case 'EvaluatorAgent':
+          if(o.score!=null) p.push('评分 '+o.score);
+          if(o.grade) p.push(o.grade);
+          if(arr(o.warnings).length) p.push('告警 '+o.warnings.length);
+          break;
+        default:
+          if(t.mode) p.push(t.mode);
+      }
+      return p.join(' · ');
+    },
+    formatDetails(d){
+      try{let s=JSON.stringify(d,null,2);return s.length>1200?s.slice(0,1200)+'\n…':s;}
+      catch{return String(d);}
+    },
+
+    // ── 导出 PDF 报告（前端 html2canvas + jsPDF） ──────────────────────────────
+    async exportPdf(){
+      if(!this.reportHtml){alert('请先生成报告再导出。');return;}
+      if(!window.html2canvas||!window.jspdf){alert('PDF 组件未加载（可能是离线无 CDN）。');return;}
+      this.exportingPdf=true;
+      const el=this._buildPrintable();
+      document.body.appendChild(el);
+      try{
+        const canvas=await html2canvas(el,{scale:2,backgroundColor:'#ffffff',useCORS:true});
+        const {jsPDF}=window.jspdf;
+        const pdf=new jsPDF('p','mm','a4');
+        const pw=pdf.internal.pageSize.getWidth();
+        const ph=pdf.internal.pageSize.getHeight();
+        const imgW=pw;
+        const imgH=canvas.height*imgW/canvas.width;
+        const imgData=canvas.toDataURL('image/jpeg',0.92);
+        let pos=0,left=imgH;
+        pdf.addImage(imgData,'JPEG',0,pos,imgW,imgH);
+        left-=ph;
+        while(left>0){pos-=ph;pdf.addPage();pdf.addImage(imgData,'JPEG',0,pos,imgW,imgH);left-=ph;}
+        pdf.save(`海洋分析报告_${new Date().toISOString().slice(0,10)}.pdf`);
+      }catch(e){
+        alert('导出失败：'+e.message);
+      }finally{
+        el.remove();this.exportingPdf=false;
+      }
+    },
+    _buildPrintable(){
+      const wrap=document.createElement('div');
+      wrap.style.cssText='position:fixed;left:-9999px;top:0;width:794px;padding:36px 40px;background:#fff;color:#111;font-family:"Microsoft YaHei","Segoe UI",sans-serif;line-height:1.7;font-size:14px;box-sizing:border-box;';
+      const s=this.stats, units=(this.gridData&&this.gridData.units)||'';
+      const score=this.evaluation?.score;
+      const now=new Date().toLocaleString('zh-CN');
+      const td='border:1px solid #cbd5e1;padding:6px;';
+      // 区域要素分布图（用已渲染的数据网格生成，避开 WebGL 截图问题）
+      let mapImg='';
+      try{
+        if(this.gridData){
+          const c=gridCanvas(this.gridData,1024,512);
+          try{applyBackendHiresMaskToCanvas(c,this.gridData);}catch(e){}
+          mapImg=c.toDataURL('image/png');
+        }
+      }catch(e){}
+      const statTable=s?`
+        <table style="width:100%;border-collapse:collapse;margin:8px 0 14px;font-size:13px">
+          <thead><tr style="background:#0f6f9f;color:#fff">
+            <th style="${td}">最小</th><th style="${td}">最大</th><th style="${td}">均值</th><th style="${td}">有效格点</th></tr></thead>
+          <tbody><tr style="text-align:center">
+            <td style="${td}">${s.min} ${units}</td><td style="${td}">${s.max} ${units}</td>
+            <td style="${td}">${s.mean} ${units}</td><td style="${td}">${s.count}</td></tr></tbody>
+        </table>`:'<p style="color:#666">（本次无区域数值统计，结论基于知识库推理）</p>';
+      const kept=this.evidence.filter(d=>d.verdict==='keep');
+      const refList=kept.length
+        ? '<ol style="margin:6px 0 0 18px;padding:0">'+kept.map(d=>`<li style="margin:3px 0">${this.escapeHtml(d.title)} <span style="color:#888">(score=${d.score})</span></li>`).join('')+'</ol>'
+        : '<p style="color:#666">本次未保留外部文献证据，结论基于区域数值与模型推理。</p>';
+      const traceRows=this.agentTrace.map(t=>`<tr>
+        <td style="border:1px solid #e2e8f0;padding:4px 6px">${this.escapeHtml(this.nodeLabel(t.node))}</td>
+        <td style="border:1px solid #e2e8f0;padding:4px 6px">${this.escapeHtml(this.traceSummary(t)||t.mode||'')}</td>
+        <td style="border:1px solid #e2e8f0;padding:4px 6px;text-align:right">${t.elapsed_ms!=null?Math.round(t.elapsed_ms)+'ms':''}</td></tr>`).join('');
+      const h2='font-size:16px;color:#0b3d5c;border-left:4px solid #0f6f9f;padding-left:8px;margin-top:20px';
+      wrap.innerHTML=`
+        <div style="border-bottom:3px solid #0f6f9f;padding-bottom:12px;margin-bottom:14px">
+          <h1 style="margin:0;font-size:22px;color:#0b3d5c">海洋数字地球 · 区域分析报告</h1>
+          <div style="margin-top:8px;color:#444;font-size:13px">
+            研究区域：${this.escapeHtml(this.regionLabel)} ｜ 领域：${this.escapeHtml(this.domain)}${score!=null?` ｜ 质量评分：${score}`:''}<br>
+            生成时间：${now}
+          </div>
+        </div>
+        <h2 style="${h2};margin-top:0">一、区域要素概览</h2>
+        ${statTable}
+        ${mapImg?`<div style="text-align:center;margin:6px 0 4px"><img src="${mapImg}" style="max-width:100%;border:1px solid #cbd5e1"><div style="color:#666;font-size:12px;margin-top:4px">图 1 区域要素分布（${this.escapeHtml(this.gridData?.long_name||this.gridData?.variable||'')}）</div></div>`:''}
+        <h2 style="${h2}">二、分析报告</h2>
+        <div style="font-size:14px">${this.reportHtml}</div>
+        <h2 style="${h2}">三、参考证据</h2>
+        ${refList}
+        <h2 style="${h2}">附录 · 执行审计链</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px">
+          <thead><tr style="background:#eef4f7">
+            <th style="border:1px solid #e2e8f0;padding:4px 6px;text-align:left">节点</th>
+            <th style="border:1px solid #e2e8f0;padding:4px 6px;text-align:left">产出摘要</th>
+            <th style="border:1px solid #e2e8f0;padding:4px 6px">耗时</th></tr></thead>
+          <tbody>${traceRows}</tbody>
+        </table>`;
+      return wrap;
+    },
     _md(text){
       if(!text)return'';
       let h=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

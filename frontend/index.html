@@ -9,7 +9,7 @@
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.122/Build/Cesium/Widgets/widgets.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.3.1/ol.css">
-  <link rel="stylesheet" href="/assets/app.css?v=20260531-v4">
+  <link rel="stylesheet" href="/assets/app.css?v=20260625-pdf">
   <style>
     [v-cloak] { display: none !important; }
     /* Particle overlay canvas on top of Cesium globe */
@@ -63,7 +63,7 @@
   </style>
 </head>
 <body>
-  <div id="app" v-cloak>
+  <div id="app" v-cloak :class="{ 'chat-open': chatOpen }">
     <!-- ── Topbar ── -->
     <header class="topbar">
       <div class="brand">
@@ -261,39 +261,11 @@
         <div id="map"></div>
       </div>
 
-      <!-- ── Report dock ── -->
-      <section id="reportDock" class="reportDock" :class="{ open: reportVisible }" aria-live="polite">
-        <div class="reportDockHeader">
-          <div>
-            <span class="eyebrow">AI REPORT</span>
-            <h2>报告阅读</h2>
-            <p>{{ reportMeta }}</p>
-          </div>
-          <button class="iconButton" @click="reportVisible = false" title="收起报告">×</button>
-        </div>
-        <div class="qualityPanel" v-if="evaluation">
-          <div class="qualityCard" v-for="card in qualityCards" :key="card.label">
-            <span class="qualityLabel">{{ card.label }}</span>
-            <span class="qualityValue">{{ card.value }}</span>
-            <span class="qualitySub">{{ card.sub }}</span>
-          </div>
-        </div>
-        <article class="reportBody" v-html="reportHtml"></article>
-      </section>
     </main>
 
-    <!-- ── FABs ── -->
-    <button class="chatFab" @click="chatOpen = true" title="打开 AI 助手">
-      <span class="aiRing" aria-hidden="true"></span>
-      <span class="aiGlyph">AI</span>
-    </button>
-    <button class="reportFab" @click="reportVisible = true" v-show="reportHtml" title="打开报告">
-      <span>报告</span>
-    </button>
-
-    <!-- ── Chat drawer ── -->
-    <aside class="chatDrawer" :class="{ open: chatOpen }">
-      <div class="chatHeader">
+    <!-- ── AI 中央会话面板 ── -->
+    <section class="aiCenter" :class="{ open: chatOpen }" aria-live="polite">
+      <div class="aiCenterHeader">
         <div>
           <span class="eyebrow">MARINE INTELLIGENCE</span>
           <h2>海洋智能助手</h2>
@@ -301,12 +273,15 @@
         </div>
         <div class="chatHeaderRight">
           <span class="geoTag" :class="{ online: geoApiReady }" title="GeoAgent 状态">GEO</span>
-          <button class="iconButton" @click="chatOpen = false" title="关闭">×</button>
+          <span class="regionBadge" :title="regionTitle">📍 {{ regionLabel }}</span>
+          <button class="iconButton pdfBtn" v-show="reportHtml" :disabled="streaming || exportingPdf"
+            @click="exportPdf" title="导出 PDF 报告">{{ exportingPdf ? '导出中…' : '导出PDF' }}</button>
+          <button class="iconButton" @click="chatOpen = false" title="收起">×</button>
         </div>
       </div>
 
-      <!-- Messages -->
-      <div class="chatMessages" ref="chatMessages">
+      <!-- Messages + report (合并阅读区) -->
+      <div class="aiMessages" ref="chatMessages">
         <div
           v-for="(msg, i) in messages"
           :key="i"
@@ -316,29 +291,8 @@
         ></div>
       </div>
 
-      <!-- Agent panels -->
-      <div class="agentPanel" v-if="agentSummary || agentTrace.length">
-        <div class="agentSummary" v-if="agentSummary" v-html="agentSummaryHtml"></div>
-        <div class="agentTrace" v-if="agentTrace.length">
-          <div v-for="(t, i) in agentTrace" :key="i" class="traceItem">
-            <span class="traceNode">{{ t.node }}</span>
-            <span class="traceMode">{{ t.mode }}</span>
-            <span class="traceStatus">{{ t.status || 'ok' }}</span>
-            <span class="traceTime" v-if="t.elapsed_ms">{{ Math.round(t.elapsed_ms) }}ms</span>
-          </div>
-        </div>
-        <div class="evidence" v-if="evidence.length">
-          <div v-for="(d, i) in evidence" :key="i" class="doc" :class="d.verdict">
-            <b>{{ d.verdict === 'keep' ? '✓ 保留' : '· PASS' }}</b>
-            {{ d.title }}
-            <small>score={{ d.score }}</small>
-          </div>
-        </div>
-      </div>
-
-      <!-- Controls -->
-      <div class="chatControls">
-        <!-- Domain tabs -->
+      <!-- Input cluster -->
+      <div class="aiInput">
         <div class="domainTabs">
           <button
             v-for="d in domains"
@@ -346,11 +300,9 @@
             class="domTab"
             :class="{ active: domain === d.id }"
             :title="d.title"
-            @click="domain = d.id; renderSuggestions()"
+            @click="domain = d.id"
           >{{ d.icon }} {{ d.label }}</button>
         </div>
-
-        <!-- Quick suggestions -->
         <div class="suggRow">
           <button
             v-for="s in suggestions"
@@ -359,18 +311,18 @@
             @click="question = s"
           >{{ s }}</button>
         </div>
-
-        <!-- Question input -->
-        <textarea v-model="question" @keydown.ctrl.enter="sendQuery" @keydown.meta.enter="sendQuery"
-          placeholder="输入海洋相关问题... (Ctrl+Enter 发送)"></textarea>
-
-        <!-- Pipeline bar -->
-        <div class="pipelineBar" v-show="streaming">
+        <div class="pipelineBar" :class="{ visible: streaming }" v-show="streaming">
           <span v-for="(s, k) in pipelineSteps" :key="k"
             class="pStep" :class="s">{{ pipelineLabels[k] }}</span>
         </div>
-
-        <!-- Advanced options -->
+        <textarea v-model="question" @keydown.ctrl.enter="sendQuery" @keydown.meta.enter="sendQuery"
+          placeholder="输入海洋相关问题... (Ctrl+Enter 发送)"></textarea>
+        <div class="aiInputBtns">
+          <button class="primary" :disabled="streaming" @click="sendQuery">
+            {{ streaming ? '分析中…' : '发送' }}
+          </button>
+          <button class="secondary" @click="clearChat">清空</button>
+        </div>
         <details class="advOpts">
           <summary>高级选项（旧版 RAG API）</summary>
           <div class="row">
@@ -378,13 +330,72 @@
             <input type="number" v-model.number="topk" min="1" max="12">
           </div>
         </details>
+      </div>
+    </section>
 
-        <button :disabled="streaming" @click="sendQuery">
-          {{ streaming ? '分析中…' : '发送' }}
-        </button>
-        <button class="secondary" @click="clearChat">清空对话</button>
+    <!-- ── 右侧审计栏 ── -->
+    <aside class="auditRail" :class="{ open: chatOpen }">
+      <div class="auditHeader">
+        <span class="eyebrow">AGENT AUDIT</span>
+        <h2>执行审计</h2>
+        <p>{{ reportMeta }}</p>
+      </div>
+      <div class="auditScroll">
+        <!-- 质量评分 -->
+        <div class="auditSection" v-if="evaluation">
+          <div class="auditSectionTitle">质量评测</div>
+          <div class="qualityPanel">
+            <div class="qualityCard" v-for="card in qualityCards" :key="card.label">
+              <span class="qualityLabel">{{ card.label }}</span>
+              <span class="qualityValue">{{ card.value }}</span>
+              <span class="qualitySub">{{ card.sub }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 审计时间线 -->
+        <div class="auditSection" v-if="agentTrace.length">
+          <div class="auditSectionTitle">节点时间线 · {{ agentTrace.length }} 步 · {{ totalElapsed }}</div>
+          <div class="traceTimeline">
+            <div v-for="(t, i) in agentTrace" :key="t.index ?? i" class="traceCard" :class="t.status">
+              <div class="traceCardTop">
+                <span class="traceDot" :class="t.status"></span>
+                <b>{{ nodeLabel(t.node) }}</b>
+                <span class="traceMode">{{ t.mode }}</span>
+                <span class="traceTime" v-if="t.elapsed_ms != null">{{ Math.round(t.elapsed_ms) }}ms</span>
+              </div>
+              <p class="traceSummary" v-if="traceSummary(t)">{{ traceSummary(t) }}</p>
+              <details class="traceDetails" v-if="t.details && Object.keys(t.details).length">
+                <summary>原始字段</summary>
+                <pre>{{ formatDetails(t.details) }}</pre>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <!-- 证据筛选 -->
+        <div class="auditSection" v-if="evidence.length">
+          <div class="auditSectionTitle">证据筛选 · 保留 {{ evidenceKept }} / {{ evidence.length }}</div>
+          <div class="evidence">
+            <div v-for="(d, i) in evidence" :key="i" class="doc" :class="d.verdict">
+              <b>{{ d.verdict === 'keep' ? '✓ 保留' : '· 略过' }}</b>
+              {{ d.title }}
+              <small>score={{ d.score }}</small>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="!agentTrace.length && !evidence.length && !evaluation" class="auditEmpty">
+          提问后，这里会<b>实时</b>显示每个 Agent 节点的执行过程、耗时与证据筛选，构成可追溯的证据链。
+        </div>
       </div>
     </aside>
+
+    <!-- FAB: 仅在收起时显示 -->
+    <button class="chatFab" v-show="!chatOpen" @click="chatOpen = true" title="打开 AI 助手">
+      <span class="aiRing" aria-hidden="true"></span>
+      <span class="aiGlyph">AI</span>
+    </button>
   </div><!-- #app -->
 
   <!-- Scripts -->
@@ -393,6 +404,9 @@
   <script src="https://cdn.jsdelivr.net/npm/vue@3.4.27/dist/vue.global.prod.js"></script>
   <!-- topojson-client for pixel-level land masking (Natural Earth 110m) -->
   <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
-  <script src="/assets/app.js?v=20260602-localearth-mask"></script>
+  <!-- PDF 导出：html2canvas 截图 + jsPDF 排版下载 -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="/assets/app.js?v=20260625-pdf"></script>
 </body>
 </html>

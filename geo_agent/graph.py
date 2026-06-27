@@ -272,6 +272,26 @@ def run(
 
     llm.reset_usage()
 
+    # 非分析类输入（问候/闲聊/求助）：直接返回引导回复，不跑整个图
+    if intent.is_smalltalk(question):
+        return {
+            "task_id": task_id,
+            "question": question,
+            "domain": "general",
+            "report": intent.smalltalk_reply(question),
+            "intent": {"intent_type": "chitchat", "domain": "general"},
+            "execution_plan": {},
+            "critic_result": {},
+            "evaluation": {},
+            "revisions": 0,
+            "kept_documents": [],
+            "passed_documents": [],
+            "elapsed_ms": round((time.time() - started) * 1000, 2),
+            "token_usage": llm.get_usage(),
+            "llm_configured": llm.configured(),
+            "chitchat": True,
+        }
+
     initial_state: GeoAgentState = {
         "question": question,
         "bbox": bbox or None,
