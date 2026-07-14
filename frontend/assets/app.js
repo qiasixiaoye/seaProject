@@ -367,14 +367,18 @@ createApp({
       return typeof v==='string' ? v : String(v);
     },
     qualityCards(){
-      const m=this.evaluation?.metrics||{};
-      const ret=m.retrieval||{}, ev=m.evidence||{}, ans=m.answer||{}, tools=m.tools||{}, sys=m.system||{};
+      const ev=this.evaluation||{};
+      const m=ev.metrics||{};
+      const ret=m.retrieval||{}, evd=m.evidence||{}, ans=m.answer||{}, sys=m.system||{};
+      const judged=ans.judge_mode==='llm';
+      const jp=v=>judged?this._pct(v):'—';   // 裁判未跑时显示 —
       return [
-        {label:'总分',value:this.evaluation?.score??'-',sub:this.evaluation?.grade||'-'},
-        {label:'检索',value:`${ret.kept_count??0}/${ret.candidate_count??0}`,sub:ret.backend||'-'},
-        {label:'引用覆盖',value:this._pct(ev.citation_coverage),sub:`证据 ${ev.evidence_count??0}`},
-        {label:'数据支撑',value:this._pct(ans.data_grounding),sub:`问题 ${ans.critic_issue_count??0}`},
-        {label:'工具',value:tools.tool_call_count??0,sub:tools.tool_success_rate==null?'未记录':this._pct(tools.tool_success_rate)},
+        {label:'总分',value:ev.score??'-',sub:`${ev.grade||'-'} · ${ev.scoring_mode==='llm_judge_weighted'?'LLM裁判':'确定性'}`},
+        {label:'引用准确率',value:evd.citation_accuracy==null?'—':this._pct(evd.citation_accuracy),sub:`核对 ${evd.citation_valid??0}/${evd.citation_total??0}${evd.citation_invalid_examples?.length?' · 有编造':''}`},
+        {label:'忠实度',value:jp(ans.faithfulness),sub:judged?'LLM 裁判':'裁判跳过'},
+        {label:'完整度',value:jp(ans.completeness),sub:'对照用户问题'},
+        {label:'相关性',value:jp(ans.relevance),sub:judged?(ans.hallucination_rate!=null?`幻觉 ${this._pct(ans.hallucination_rate)}`:'切题度'):'切题度'},
+        {label:'数据支撑',value:this._pct(ans.data_grounding),sub:`检索 ${ret.kept_count??0}/${ret.candidate_count??0}`},
         {label:'耗时',value:sys.elapsed_ms?`${(sys.elapsed_ms/1000).toFixed(1)}s`:'-',sub:`tokens ${sys.token_usage?.total_tokens??0}`},
       ];
     },
@@ -796,6 +800,11 @@ createApp({
             if(ex>=0) this.agentTrace.splice(ex,1,msg.item);
             else this.agentTrace.push(msg.item);
           }
+        }
+        else if(type==='revision'){
+          const rv=(c&&c.revision)||(d&&d.revision)||msg.revision||1;
+          this.reportStatus=`Critic 审稿打回，正在按意见修订（第 ${rv} 稿）…`;
+          buf='';upd();   // 清空上一稿，让修订稿替换而非堆叠
         }
         else if(type==='token'){buf+=(d||c||'');upd();}
         else if(type==='done'){

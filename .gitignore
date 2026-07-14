@@ -33,3 +33,4 @@ seaProject/
 docker_deploy/image-tars/*.tar
 docker_deploy/ragflow/data/
 docker_deploy/ragflow/logs/
+docker_deploy/ragflow/volumes/*.tar.gz

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Generator
 
 from geo_agent import llm
@@ -135,6 +136,7 @@ def _build_messages(
     sections = DOMAIN_SECTIONS.get(domain, DOMAIN_SECTIONS["general"])
     section_list = "、".join(sections)
 
+    evidence_n = min(len(kept_docs), 8)
     evidence = "\n\n".join(
         f"{_evidence_label(d, i)} 标题：{d.get('title','')}\n"
         f"来源：{d.get('source','')}\n"
@@ -160,11 +162,19 @@ def _build_messages(
         user_content += f"\n\n【审稿意见，请据此修订】\n{feedback}"
 
     system_prompt = (
+        f"今天是 {datetime.now().strftime('%Y年%m月%d日')}，这是本报告的生成日期。"
+        "如需在报告中标注日期或落款，一律使用该生成日期；"
+        "不得自行编造其它年份或观测时间（证据/数据本身的年份以输入材料为准）。\n"
         f"你是专业的地理与海洋科学分析助手，生成《{title}》。\n"
         f"报告必须包含以下章节：{section_list}。\n"
-        "每个核心结论必须引用证据来源（格式：……[来源：文件名·p.页码]）。\n"
-        "证据不足时明确说明，不得编造数据。\n"
-        "引用优先使用输入证据标签（如 [E1: doc_id/chunk_id]）。\n"
+        + (
+            f"【引用规则｜务必遵守】每个核心结论的句末必须用方括号标注所依据的证据编号，"
+            f"格式为 [E数字]，可多条如 [E1][E3]；编号只能取自下方“保留证据”列表的 E1 到 E{evidence_n}，"
+            f"严禁引用不存在的编号，严禁编造数据。例如：“该海域存在热浪风险[E2]。”\n"
+            if evidence_n > 0 else
+            "【引用规则】本次未检索到相关证据，请在报告中明确说明“证据不足，以下为基于区域数值的推断”，不得编造文献或数据。\n"
+        )
+        + "证据不足时明确说明，不得编造数据。\n"
         "输出中文报告，Markdown 格式，含标题层级。"
     )
 

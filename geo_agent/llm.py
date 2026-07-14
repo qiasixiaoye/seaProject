@@ -56,17 +56,24 @@ def _record_usage(response_or_dict: Any) -> None:
 
 
 # ── LLM 工厂 ───────────────────────────────────────────────────────────────
-def _make_langchain_llm(temperature: float = 0.3):
-    """构建 LangChain ChatOpenAI 实例（指向 DeepSeek）。"""
+def _make_langchain_llm(temperature: float = 0.3, timeout: float | None = None):
+    """构建 LangChain ChatOpenAI 实例（指向 DeepSeek）。
+
+    timeout 给评估裁判等"宁可降级也不能卡死"的场景用：超时即抛错，由调用方回退。
+    """
     from langchain_openai import ChatOpenAI  # type: ignore
 
-    return ChatOpenAI(
+    kwargs: dict[str, Any] = dict(
         api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com") + "/v1",
         model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
         temperature=temperature,
         max_retries=2,
     )
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+        kwargs["max_retries"] = 0   # 演示场景：超时不重试，直接降级
+    return ChatOpenAI(**kwargs)
 
 
 def configured() -> bool:
@@ -96,8 +103,9 @@ def chat(messages: list[dict[str, str]], temperature: float = 0.3) -> str:
         return deepseek_client.chat(messages)
 
 
-def chat_json(messages: list[dict[str, str]], temperature: float = 0.1) -> Any:
-    """发送对话，强制返回 JSON（dict/list）。"""
+def chat_json(messages: list[dict[str, str]], temperature: float = 0.1,
+              timeout: float | None = None) -> Any:
+    """发送对话，强制返回 JSON（dict/list）。timeout 用于评估裁判等防卡死场景。"""
     try:
         from langchain_openai import ChatOpenAI  # type: ignore
         from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore
@@ -109,7 +117,7 @@ def chat_json(messages: list[dict[str, str]], temperature: float = 0.1) -> Any:
                 lc_messages.append(SystemMessage(content=content))
             else:
                 lc_messages.append(HumanMessage(content=content))
-        llm = _make_langchain_llm(temperature).bind(
+        llm = _make_langchain_llm(temperature, timeout=timeout).bind(
             response_format={"type": "json_object"}
         )
         resp = llm.invoke(lc_messages)
