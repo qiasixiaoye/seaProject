@@ -1,0 +1,30 @@
+{
+  "schema_version": "curated_visual_evidence.v1",
+  "purpose": "A small authoritative validation set for Chinese-CLIP image-to-text retrieval.",
+  "items": [
+    {
+      "id": "nasa-la-nina-2022",
+      "path": "data/curated_multimodal/images/nasa_la_nina_2022.jpeg",
+      "source_page": "https://earthobservatory.nasa.gov/images/150691/la-nina-times-three",
+      "asset_url": "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/imagerecords/150000/150691/lanina_mur_2022333.jpg/jcr:content/renditions/cq5dam.web.1280.1280.jpeg",
+      "credit": "NASA Earth Observatory",
+      "expected_evidence_ids": ["curated-nasa-la-nina-2022", "curated-noaa-oni-nino34", "curated-noaa-oisst-v21"]
+    },
+    {
+      "id": "noaa-pacific-sst-anomaly-20221204",
+      "path": "data/curated_multimodal/images/noaa_pacific_sst_anomaly_20221204.png",
+      "source_page": "https://coralreefwatch.noaa.gov/satellite/analyses_guidance/pacific_cbts_ag_20221205.php",
+      "asset_url": "https://coralreefwatch.noaa.gov/satellite/analyses_guidance/pacific_climate_updates/ct5km_ssta_v3.1_pacific_20221204.png",
+      "credit": "NOAA Coral Reef Watch",
+      "expected_evidence_ids": ["curated-noaa-pacific-ssta-20221204", "curated-noaa-oni-nino34", "curated-noaa-oisst-v21"]
+    },
+    {
+      "id": "ipcc-marine-heatwaves-figure-6-3",
+      "path": "data/curated_multimodal/images/ipcc_marine_heatwaves_figure_6_3.jpg",
+      "source_page": "https://www.ipcc.ch/srocc/chapter/chapter-6/",
+      "asset_url": "https://www.ipcc.ch/site/assets/uploads/sites/3/2019/11/IPCC-SROCC-CH_6_3.jpg",
+      "credit": "IPCC SROCC, Figure 6.3",
+      "expected_evidence_ids": ["curated-ipcc-srocc-mhw-figure-6-3", "curated-hobday-mhw-definition-2016"]
+    }
+  ]
+}

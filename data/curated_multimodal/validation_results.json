@@ -1,0 +1,37 @@
+{
+  "schema_version": "curated_retrieval_validation.v1",
+  "validated_at": "2026-07-14T23:43:00+08:00",
+  "index_version": "ocean-20260714-154310",
+  "model": "OFA-Sys/chinese-clip-vit-base-patch16",
+  "top_k": 10,
+  "results": [
+    {
+      "case": "nasa-la-nina-2022",
+      "expected": "curated-nasa-la-nina-2022",
+      "rank": 1,
+      "clip_score": 0.478098
+    },
+    {
+      "case": "noaa-pacific-sst-anomaly-20221204",
+      "expected": "curated-noaa-pacific-ssta-20221204",
+      "rank": 4,
+      "clip_score": 0.458398
+    },
+    {
+      "case": "ipcc-marine-heatwaves-figure-6-3",
+      "expected": "curated-ipcc-srocc-mhw-figure-6-3",
+      "rank": 1,
+      "clip_score": 0.515321
+    },
+    {
+      "case": "user-sst-2011-significance-map",
+      "source_file": "570c17ddcfdc32f748b3870696cb83db.png (external test image; not committed)",
+      "expected_ranks": {
+        "curated-noaa-oisst-v21": 4,
+        "curated-noaa-oni-nino34": 6,
+        "curated-wilks-stippling-2016": 7
+      },
+      "note": "The image retrieves SST/ENSO and stippling-significance evidence in Top-10. Marine-heatwave hits are hypotheses only and must not be presented as direct image identification."
+    }
+  ]
+}

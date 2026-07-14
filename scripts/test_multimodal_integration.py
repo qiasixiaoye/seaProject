@@ -9,9 +9,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from geo_agent import multimodal_client
-from geo_agent.nodes import retrieval
+from geo_agent.nodes import critic, report, retrieval
 from multimodal_service.app.diagnostics import score_diagnostics
-from ocean_agents_demo.core import Doc
+from ocean_agents_demo.core import Doc, clear_doc_cache, load_docs
 
 
 def test_rrf_merges_shared_chunk() -> None:
@@ -151,6 +151,48 @@ def test_cross_backend_page_identity_merges() -> None:
     assert fused[0]["metadata"]["fusion"]["route_ranks"] == {"text": 1, "image": 1}
 
 
+def test_curated_evidence_is_loaded() -> None:
+    clear_doc_cache()
+    curated = [doc for doc in load_docs() if doc.id.startswith("curated-")]
+    assert len(curated) == 7
+    assert {doc.id for doc in curated} >= {
+        "curated-noaa-pacific-ssta-20221204",
+        "curated-hobday-mhw-definition-2016",
+        "curated-wilks-stippling-2016",
+    }
+
+
+def test_image_report_prompt_exposes_capability_boundary() -> None:
+    messages = report._build_messages(
+        domain="general",
+        intent={"original_question": "这张图说明什么？"},
+        kept_docs=[],
+        passed_docs=[],
+        ocean_data={},
+        domain_analysis={},
+        risk_hypotheses=[],
+        backend_used="local+multimodal",
+        image_mode=True,
+        retrieval_routes=[{"route": "chinese_clip_image_to_text", "count": 6, "weight": 1.0}],
+        feedback=None,
+    )
+    system = messages[0]["content"]
+    assert "图片检索与证据解读报告" in system
+    assert "没有直接看到原图" in system
+    assert "不得把召回文本中的年份、数值、事件或区域冒充" in system
+    assert "chinese_clip_image_to_text" in messages[1]["content"]
+
+
+def test_image_critic_requires_boundary_but_accepts_it() -> None:
+    missing = critic._rule_critique({"image_ref": "img-test", "report": "这是一个海温异常图。"})
+    assert "image_retrieval_boundary_missing" in missing["issues"]
+    present = critic._rule_critique({
+        "image_ref": "img-test",
+        "report": "图片仅用于跨模态文字召回，当前模型未直接读取色标或像素。",
+    })
+    assert present["passed"] is True
+
+
 if __name__ == "__main__":
     tests = [
         test_rrf_merges_shared_chunk,
@@ -161,6 +203,9 @@ if __name__ == "__main__":
         test_score_diagnostics_are_explicitly_uncalibrated,
         test_successful_multimodal_trace_is_explainable,
         test_cross_backend_page_identity_merges,
+        test_curated_evidence_is_loaded,
+        test_image_report_prompt_exposes_capability_boundary,
+        test_image_critic_requires_boundary_but_accepts_it,
     ]
     for test in tests:
         test()

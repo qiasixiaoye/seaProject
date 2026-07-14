@@ -1,0 +1,112 @@
+[
+  {
+    "id": "curated-noaa-pacific-ssta-20221204",
+    "title": "NOAA Coral Reef Watch：太平洋海表温度异常图（2022-12-04）",
+    "kind": "official_visual_evidence",
+    "year": 2022,
+    "source": "https://coralreefwatch.noaa.gov/satellite/analyses_guidance/pacific_cbts_ag_20221205.php",
+    "topics": ["海表温度异常", "SST anomaly", "太平洋", "拉尼娜", "红蓝发散色标", "空间分布图"],
+    "abstract": "官方图像视觉描述：经纬度太平洋地图使用蓝—白—黄—红发散色标表示海表温度异常，单位为摄氏度；蓝色代表负异常、黄色到红色代表正异常。2022年12月4日图中，赤道中东太平洋存在连续蓝色冷异常带，是拉尼娜型SST异常空间结构；副热带和西部部分海域以黄色到红色暖异常为主。该图适合召回包含世界地图、太平洋、赤道带状冷暖异常、经纬网、海温色标和海岸线的科学可视化。它是某一日异常场，不能单凭一张图判断长期趋势或因果。",
+    "metadata": {
+      "authority": "NOAA Coral Reef Watch",
+      "source_type": "official_product",
+      "paired_image": "data/curated_multimodal/images/noaa_pacific_sst_anomaly_20221204.png",
+      "image_credit": "NOAA Coral Reef Watch",
+      "visual_terms": ["蓝色冷异常带", "红色暖异常", "赤道太平洋", "经纬度地图", "SST异常色标"],
+      "quality_tier": "curated_authoritative"
+    }
+  },
+  {
+    "id": "curated-nasa-la-nina-2022",
+    "title": "NASA Earth Observatory：连续第三年拉尼娜的全球SST异常图",
+    "kind": "official_visual_evidence",
+    "year": 2022,
+    "source": "https://earthobservatory.nasa.gov/images/150691/la-nina-times-three",
+    "topics": ["拉尼娜", "ENSO", "海表温度异常", "全球海洋", "赤道太平洋", "卫星遥感"],
+    "abstract": "官方图像视觉描述：全球椭圆投影海表温度异常图，海洋以蓝—白—黄—红颜色编码，色标约为负4至正4摄氏度；东部和中部赤道太平洋可见横向延伸的蓝色冷异常，是拉尼娜的典型海温信号。图像适合召回全球海温异常、ENSO、赤道太平洋冷舌、卫星遥感和红蓝异常分布等文本。NASA说明这是罕见的连续第三年拉尼娜事件背景图；单幅异常图仍需结合基准期、时间序列和大气指标解释。",
+    "metadata": {
+      "authority": "NASA Earth Observatory",
+      "source_type": "official_science_image",
+      "paired_image": "data/curated_multimodal/images/nasa_la_nina_2022.jpeg",
+      "image_credit": "NASA Earth Observatory",
+      "visual_terms": ["全球椭圆地图", "赤道太平洋冷舌", "蓝白红色标", "SST anomaly"],
+      "quality_tier": "curated_authoritative"
+    }
+  },
+  {
+    "id": "curated-ipcc-srocc-mhw-figure-6-3",
+    "title": "IPCC SROCC 图6.3：海洋热浪及其观测影响",
+    "kind": "assessment_visual_evidence",
+    "year": 2019,
+    "source": "https://www.ipcc.ch/srocc/chapter/chapter-6/",
+    "topics": ["海洋热浪", "SST异常", "珊瑚白化", "生态影响", "全球地图", "IPCC"],
+    "abstract": "权威评估图视觉描述：双面板全球地图采用浅红到深红色阶展示海洋热浪最大强度，并标注黄海、东海、西澳、阿拉斯加、东北太平洋等事件及生态、物理和社会经济影响；另一面板用黄红色展示累积热胁迫，并用蓝紫圆点表示珊瑚白化程度。该图适合召回海洋热浪、海温正异常、珊瑚白化、生态影响和全球极端事件分布。它综合多个事件，不能被解释为某一具体日期的实时海况。",
+    "metadata": {
+      "authority": "IPCC",
+      "source_type": "assessment_report_figure",
+      "paired_image": "data/curated_multimodal/images/ipcc_marine_heatwaves_figure_6_3.jpg",
+      "image_credit": "IPCC SROCC, Figure 6.3",
+      "visual_terms": ["双面板全球地图", "红色热浪强度", "珊瑚白化圆点", "生态影响图标"],
+      "quality_tier": "curated_authoritative"
+    }
+  },
+  {
+    "id": "curated-noaa-oisst-v21",
+    "title": "NOAA 1/4° Daily Optimum Interpolation Sea Surface Temperature (OISST) v2.1",
+    "kind": "official_dataset",
+    "year": 2021,
+    "source": "https://www.ncei.noaa.gov/products/optimum-interpolation-sst",
+    "topics": ["OISST", "海表温度", "SST异常", "卫星", "浮标", "全球网格"],
+    "abstract": "NOAA OISST v2.1 是日尺度、四分之一度全球海表温度气候数据记录，将卫星、船舶、浮标和Argo观测插值到规则网格，并提供SST及相关异常分析。数据覆盖从1981年9月至今，适合作为ENSO、海洋热浪和区域海温异常图的基础数据来源。使用时必须记录产品版本、日期、空间范围和异常基准期；OISST产品说明支持数据来源判断，但不能替代对用户上传图片色标、单位和统计量的核验。",
+    "metadata": {
+      "authority": "NOAA NCEI",
+      "source_type": "official_dataset",
+      "quality_tier": "curated_authoritative"
+    }
+  },
+  {
+    "id": "curated-noaa-oni-nino34",
+    "title": "NOAA Oceanic Niño Index 与 Niño 3.4 区域说明",
+    "kind": "official_method",
+    "year": 2024,
+    "source": "https://www.climate.gov/news-features/understanding-climate/climate-variability-oceanic-nino-index",
+    "topics": ["ENSO", "ONI", "Niño 3.4", "赤道太平洋", "海温异常", "厄尔尼诺", "拉尼娜"],
+    "abstract": "NOAA使用Oceanic Niño Index作为ENSO的主要海洋指标，核心是Niño 3.4区域（约5°N–5°S、170°W–120°W）的三个月滑动平均海表温度异常。赤道中东太平洋持续正异常与厄尔尼诺相关，持续负异常与拉尼娜相关，但事件判定还涉及持续时间、阈值及大气耦合，不能仅凭一张空间图或单月图下结论。该证据特别适合解释太平洋地图中沿赤道向东延伸的红色暖异常带或蓝色冷异常带。",
+    "metadata": {
+      "authority": "NOAA Climate.gov",
+      "source_type": "official_indicator_method",
+      "quality_tier": "curated_authoritative"
+    }
+  },
+  {
+    "id": "curated-hobday-mhw-definition-2016",
+    "title": "Hobday et al. (2016)：海洋热浪的分层定义方法",
+    "kind": "peer_reviewed_paper",
+    "year": 2016,
+    "source": "https://doi.org/10.1016/j.pocean.2015.12.014",
+    "topics": ["海洋热浪", "MHW", "90百分位", "持续时间", "气候基准", "SST时间序列"],
+    "abstract": "Hobday等提出可复现的海洋热浪定义：相对于逐日季节气候基准，水温超过第90百分位并持续至少5天的离散异常暖事件；事件可由持续时间、最大和平均强度、累积强度、发展和衰减速率以及空间范围描述。该定义要求时间序列和基准气候态，因此一张红色SST异常空间图只能提示可能的暖异常，不能单独证明已构成海洋热浪。",
+    "metadata": {
+      "authority": "Progress in Oceanography / NOAA repository copy",
+      "repository": "https://repository.library.noaa.gov/view/noaa/63891",
+      "doi": "10.1016/j.pocean.2015.12.014",
+      "source_type": "peer_reviewed_method",
+      "quality_tier": "curated_peer_reviewed"
+    }
+  },
+  {
+    "id": "curated-wilks-stippling-2016",
+    "title": "Wilks (2016)：空间显著性点状标记与多重检验",
+    "kind": "peer_reviewed_paper",
+    "year": 2016,
+    "source": "https://doi.org/10.1175/BAMS-D-15-00267.1",
+    "topics": ["显著性检验", "stipple", "点状标记", "空间场", "多重检验", "FDR", "气候地图"],
+    "abstract": "该论文专门讨论气候和大气科学空间图中的点状显著性标记。对大量网格点分别进行局地显著性检验会产生多重比较问题，容易把零散显著网格过度解释为稳健空间信号；应报告检验方法、显著性水平、场显著性或采用错误发现率等控制方法。视觉上，黑色圆点、网点或stipple通常表示通过某项统计检验的网格，但点的确切含义必须以原图图注为准，不能仅靠图片外观断言。",
+    "metadata": {
+      "authority": "Bulletin of the American Meteorological Society",
+      "doi": "10.1175/BAMS-D-15-00267.1",
+      "source_type": "peer_reviewed_method",
+      "quality_tier": "curated_peer_reviewed"
+    }
+  }
+]

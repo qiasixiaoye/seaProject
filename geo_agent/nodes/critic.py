@@ -42,6 +42,7 @@ def _rule_critique(state: GeoAgentState) -> dict[str, Any]:
     report = state.get("report", "") or ""
     kept_docs = state.get("kept_docs", []) or []
     data_context = state.get("data_context", {}) or {}
+    image_mode = bool(str(state.get("image_ref") or "").strip())
     issues: list[str] = []
 
     strong_markers = ("必然", "一定", "显著", "主要风险", "high risk", "significant risk", "must")
@@ -55,6 +56,8 @@ def _rule_critique(state: GeoAgentState) -> dict[str, Any]:
         issues.append("unsupported_strong_claim")
     if data_context.get("quality_flags") and not has_no_evidence_notice:
         issues.append("data_limitation_missing")
+    if image_mode and not any(marker in report for marker in ("图片仅用于", "跨模态", "没有直接", "未直接", "不能仅凭")):
+        issues.append("image_retrieval_boundary_missing")
 
     feedback_parts = []
     if "citation_missing" in issues:
@@ -63,6 +66,8 @@ def _rule_critique(state: GeoAgentState) -> dict[str, Any]:
         feedback_parts.append("没有保留证据时不要给出强结论，应改为风险假设并说明证据不足。")
     if "data_limitation_missing" in issues:
         feedback_parts.append("报告需要说明 bbox、NetCDF 变量缺失或无数值上下文带来的数据局限。")
+    if "image_retrieval_boundary_missing" in issues:
+        feedback_parts.append("必须说明图片仅用于跨模态召回，报告模型未直接读取图片像素、OCR、色标或数值，不能把召回证据当作原图识别结果。")
 
     return {
         "passed": not issues,
@@ -91,6 +96,8 @@ def _llm_critique(state: GeoAgentState) -> dict[str, Any]:
     report = state.get("report", "")
     kept_docs = state.get("kept_docs", [])
     intent = state.get("intent", {})
+    image_mode = bool(str(state.get("image_ref") or "").strip())
+    has_ocean_numbers = bool((state.get("ocean_data") or {}).get("variables"))
 
     evidence_list = "\n".join(
         f"- {d.get('title','')}（{d.get('source','')}）"
@@ -103,17 +110,27 @@ def _llm_critique(state: GeoAgentState) -> dict[str, Any]:
         "navigation": "⑥ 是否针对不同船型分别给出了风险评级；",
         "marine":     "⑥ 是否基于数值阈值而不是泛泛而谈；",
     }.get(domain, "")
+    if image_mode:
+        domain_checks = (
+            "⑥ 是否明确说明图片只用于跨模态文字召回，报告模型未直接读取图片、OCR、色标或像素数值；\n"
+            "⑦ 是否避免把召回文献的年份、区域、数值或事件冒充为用户图片本身的信息；\n"
+            "⑧ 是否给出图题、图注、变量、单位、基准期和检验方法等必要补充项；\n"
+        )
+    elif domain == "marine" and not has_ocean_numbers:
+        domain_checks = "⑥ 无可用区域数值时，是否避免强行给出数值阈值结论；\n"
 
     messages = [
         {
             "role": "system",
             "content": (
-                "你是报告质量审稿人。检查以下各项：\n"
+                "你是报告质量审稿人。只有下列阻断性问题才将 passed 设为 false：捏造事实或引用、核心问题未回答、关键证据与结论矛盾、遗漏会导致误解的能力边界。"
+                "措辞、章节详略或建议不够丰富属于非阻断性改进，应写入 issues 但保持 passed=true，避免为风格问题反复改稿。\n"
+                "检查以下各项：\n"
                 "① 每个核心结论都有证据或数值支撑；\n"
                 "② 没有把文件名/元数据当正文引用；\n"
                 "③ 证据不足时如实说明，不强行下结论；\n"
                 "④ 覆盖了用户问题的核心要素；\n"
-                "⑤ 给出了可执行的规划/建议；\n"
+                "⑤ 当问题本身需要行动建议且证据足够时，才要求给出可执行建议；\n"
                 f"{domain_checks}"
                 '输出 JSON：{"passed":true|false,"issues":["..."],'
                 '"feedback":"给作者的具体修改意见"}。只输出 JSON。'

@@ -21,6 +21,7 @@ from ocean_agents_demo import deepseek_client
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 KNOWLEDGE_JSON = DATA_DIR / "ocean_knowledge.json"
+CURATED_MULTIMODAL_JSON = DATA_DIR / "curated_multimodal" / "evidence.json"
 KNOWLEDGE_DOCS_DIR = DATA_DIR / "knowledge_docs"
 PDF_REPORTS_DIR = DATA_DIR / "pdf_reports"
 TOKEN_RE = re.compile(r"[A-Za-z0-9_+-]+|[\u4e00-\u9fff]+")
@@ -340,6 +341,9 @@ def _load_docs_cached() -> tuple[Doc, ...]:
     docs: list[Doc] = []
     if KNOWLEDGE_JSON.exists():
         raw = json.loads(KNOWLEDGE_JSON.read_text(encoding="utf-8"))
+        docs.extend(Doc(**item) for item in raw)
+    if CURATED_MULTIMODAL_JSON.exists():
+        raw = json.loads(CURATED_MULTIMODAL_JSON.read_text(encoding="utf-8"))
         docs.extend(Doc(**item) for item in raw)
     docs.extend(load_structured_markdown_docs(KNOWLEDGE_DOCS_DIR))
     docs.extend(load_structured_pdf_docs(PDF_REPORTS_DIR))

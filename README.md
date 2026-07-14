@@ -92,6 +92,10 @@ docker compose --profile indexing run --rm multimodal-index-builder
 
 一次性建库任务以可写方式挂载 `data/multimodal_index`，在线服务保持只读挂载。模型权重首次使用时下载到 `multimodal-model-cache`。未构建索引或服务不可用时，带文字的问题会自动降级到原有文本 RAG。
 
+仓库内另有一组小规模权威验证集 `data/curated_multimodal`，包含 3 张 NASA/NOAA/IPCC 官方图像和 7 条与 SST 异常、ENSO、海洋热浪及空间显著性检验直接相关的证据。它会随 `load_docs()` 自动进入文字知识库和 Chinese-CLIP 索引。该集合用于验证“图片能否召回正确证据”，不是通用训练集，也不应被扩充为大量低质量图片。
+
+图片查询模式的能力边界：当前图片只经过 Chinese-CLIP 编码并检索文字证据，未执行 OCR、图像描述、色标读取或像素级数值解析。报告会把“召回到的证据”和“从原图直接识别到的信息”明确区分；确定解释仍需用户提供图题、图注、变量、单位、时间、异常基准期和显著性检验方法。
+
 启动 RAGFlow：
 
 ```powershell

@@ -32,6 +32,9 @@ DOMAIN_SECTIONS = {
     "general":    ["区域概况", "主要发现", "风险与不确定性", "建议"],
 }
 
+MULTIMODAL_TITLE = "图片检索与证据解读报告"
+MULTIMODAL_SECTIONS = ["输入与方法边界", "图片召回结果", "可支持的科学解释", "不确定性与下一步"]
+
 
 def run(state: GeoAgentState, feedback: str | None = None) -> dict[str, Any]:
     domain = state.get("domain", "general")
@@ -42,6 +45,8 @@ def run(state: GeoAgentState, feedback: str | None = None) -> dict[str, Any]:
     domain_analysis = state.get("domain_analysis", {})
     risk_hypotheses = state.get("risk_hypotheses", [])
     backend_used = state.get("backend_used", "local")
+    image_mode = bool(str(state.get("image_ref") or "").strip())
+    retrieval_routes = state.get("retrieval_routes", [])
     revisions = state.get("revisions", 0)
     trace = list(state.get("trace", []))
 
@@ -56,15 +61,17 @@ def run(state: GeoAgentState, feedback: str | None = None) -> dict[str, Any]:
                 domain_analysis=domain_analysis,
                 risk_hypotheses=risk_hypotheses,
                 backend_used=backend_used,
+                image_mode=image_mode,
+                retrieval_routes=retrieval_routes,
                 feedback=feedback,
             )
             mode = "llm"
         except Exception as exc:
             log.warning("ReportNode LLM failed, using template: %s", exc)
-            report_text = _template_report(domain, intent, kept_docs, ocean_data, risk_hypotheses)
+            report_text = _template_report(domain, intent, kept_docs, ocean_data, risk_hypotheses, image_mode)
             mode = "template_fallback"
     else:
-        report_text = _template_report(domain, intent, kept_docs, ocean_data, risk_hypotheses)
+        report_text = _template_report(domain, intent, kept_docs, ocean_data, risk_hypotheses, image_mode)
         mode = "template"
 
     trace.append({"node": "ReportNode", "mode": mode, "revised": bool(feedback),
@@ -85,9 +92,10 @@ def stream(state: GeoAgentState, feedback: str | None = None) -> Generator[str, 
     domain_analysis = state.get("domain_analysis", {})
     risk_hypotheses = state.get("risk_hypotheses", [])
     backend_used = state.get("backend_used", "local")
+    image_mode = bool(str(state.get("image_ref") or "").strip())
 
     if not llm.configured():
-        yield _template_report(domain, intent, kept_docs, ocean_data, risk_hypotheses)
+        yield _template_report(domain, intent, kept_docs, ocean_data, risk_hypotheses, image_mode)
         return
 
     messages = _build_messages(
@@ -95,6 +103,7 @@ def stream(state: GeoAgentState, feedback: str | None = None) -> Generator[str, 
         passed_docs=state.get("passed_docs", []),
         ocean_data=ocean_data, domain_analysis=domain_analysis,
         risk_hypotheses=risk_hypotheses, backend_used=backend_used,
+        image_mode=image_mode, retrieval_routes=state.get("retrieval_routes", []),
         feedback=feedback,
     )
     for token in llm.chat_stream(messages):
@@ -111,12 +120,15 @@ def _llm_report(
     domain_analysis: dict,
     risk_hypotheses: list,
     backend_used: str,
+    image_mode: bool,
+    retrieval_routes: list,
     feedback: str | None,
 ) -> str:
     messages = _build_messages(
         domain=domain, intent=intent, kept_docs=kept_docs, passed_docs=passed_docs,
         ocean_data=ocean_data, domain_analysis=domain_analysis,
-        risk_hypotheses=risk_hypotheses, backend_used=backend_used, feedback=feedback,
+        risk_hypotheses=risk_hypotheses, backend_used=backend_used,
+        image_mode=image_mode, retrieval_routes=retrieval_routes, feedback=feedback,
     )
     return llm.chat(messages)
 
@@ -130,28 +142,33 @@ def _build_messages(
     domain_analysis: dict,
     risk_hypotheses: list,
     backend_used: str,
+    image_mode: bool,
+    retrieval_routes: list,
     feedback: str | None,
 ) -> list[dict]:
-    title = DOMAIN_TITLES.get(domain, DOMAIN_TITLES["general"])
-    sections = DOMAIN_SECTIONS.get(domain, DOMAIN_SECTIONS["general"])
+    title = MULTIMODAL_TITLE if image_mode else DOMAIN_TITLES.get(domain, DOMAIN_TITLES["general"])
+    sections = MULTIMODAL_SECTIONS if image_mode else DOMAIN_SECTIONS.get(domain, DOMAIN_SECTIONS["general"])
     section_list = "、".join(sections)
 
     evidence_n = min(len(kept_docs), 8)
     evidence = "\n\n".join(
         f"{_evidence_label(d, i)} 标题：{d.get('title','')}\n"
         f"来源：{d.get('source','')}\n"
+        f"召回路径：{_evidence_route(d)}\n"
         f"相关分：{d.get('decision_score', d.get('score',0)):.3f}\n"
-        f"摘要：{str(d.get('abstract',''))[:300]}"
+        f"摘要：{str(d.get('abstract',''))[:450]}"
         for i, d in enumerate(kept_docs[:8], 1)
     ) or "当前知识库未找到相关证据，基于数值推理生成报告。"
 
     numbers = _format_numbers(ocean_data)
     analysis_summary = _format_domain_analysis(domain, domain_analysis)
     hyp_text = _format_hypotheses(risk_hypotheses)
+    route_text = _format_retrieval_routes(retrieval_routes)
 
     user_content = (
         f"用户问题：{intent.get('original_question','')}\n"
         f"检索后端：{backend_used}\n\n"
+        f"检索路径：\n{route_text}\n\n"
         f"区域数值：\n{numbers}\n\n"
         f"领域分析：\n{analysis_summary}\n\n"
         f"风险假设：\n{hyp_text}\n\n"
@@ -167,6 +184,14 @@ def _build_messages(
         "不得自行编造其它年份或观测时间（证据/数据本身的年份以输入材料为准）。\n"
         f"你是专业的地理与海洋科学分析助手，生成《{title}》。\n"
         f"报告必须包含以下章节：{section_list}。\n"
+        + (
+            "【图片模式边界】系统只用 Chinese-CLIP 将图片编码后检索文字证据，报告模型没有直接看到原图，也没有执行OCR、色标读取或像素级数值解析。"
+            "必须在报告开头明确这一点。只能说明哪些文献被图片向量召回，以及这些证据通常如何解释；"
+            "不得把召回文本中的年份、数值、事件或区域冒充为用户图片本身的信息。"
+            "若用户同时提供了文字描述，可将其标为用户提供信息，但仍不得声称已从图片直接识别。"
+            "结尾给出要获得确定结论还需要的图题、图注、变量、单位、色标含义、时间、基准期和显著性检验方法。\n"
+            if image_mode else ""
+        )
         + (
             f"【引用规则｜务必遵守】每个核心结论的句末必须用方括号标注所依据的证据编号，"
             f"格式为 [E数字]，可多条如 [E1][E3]；编号只能取自下方“保留证据”列表的 E1 到 E{evidence_n}，"
@@ -190,14 +215,40 @@ def _template_report(
     kept_docs: list,
     ocean_data: dict,
     risk_hypotheses: list,
+    image_mode: bool = False,
 ) -> str:
-    title = DOMAIN_TITLES.get(domain, "分析报告")
+    title = MULTIMODAL_TITLE if image_mode else DOMAIN_TITLES.get(domain, "分析报告")
     lines = [
         f"# {title}",
         "",
         f"## 问题",
         intent.get("original_question", ""),
         "",
+    ]
+    if image_mode:
+        lines += [
+            "## 输入与方法边界",
+            "图片仅用于 Chinese-CLIP 跨模态文字召回；当前报告没有直接读取原图像素、OCR、色标或数值。以下内容是召回证据的解释，不是对原图的确定识别。",
+            "",
+            "## 图片召回结果",
+        ]
+        for i, doc in enumerate(kept_docs, 1):
+            lines.append(f"- {_evidence_label(doc, i)} {doc.get('title','')}（{_source_with_page(doc)}）")
+        if not kept_docs:
+            lines.append("- 未检索到足够相关证据")
+        lines += [
+            "",
+            "## 可支持的科学解释",
+            "请结合上述证据与原图图题、图注后再作判断。",
+            "",
+            "## 不确定性与下一步",
+            "需要补充变量、单位、时间、异常基准期、色标含义及显著性检验方法。",
+            "",
+            "## 注",
+            "（本报告由模板生成，请配置 DEEPSEEK_API_KEY 启用 LLM 增强报告）",
+        ]
+        return "\n".join(lines)
+    lines += [
         "## 区域数值",
         _format_numbers(ocean_data),
         "",
@@ -212,6 +263,30 @@ def _template_report(
         lines.append("- 未检索到足够相关证据")
     lines += ["", "## 注", "（本报告由模板生成，请配置 DEEPSEEK_API_KEY 启用 LLM 增强报告）"]
     return "\n".join(lines)
+
+
+def _evidence_route(doc: dict[str, Any]) -> str:
+    routes = doc.get("retrieval_routes") or []
+    if routes:
+        return "+".join(str(item) for item in routes)
+    return str(doc.get("route") or (doc.get("metadata") or {}).get("route") or doc.get("backend") or "unknown")
+
+
+def _format_retrieval_routes(routes: list) -> str:
+    if not routes:
+        return "- 未提供检索路径明细"
+    lines = []
+    for item in routes:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("route") or "unknown"
+        status = f"count={item.get('count', 0)}"
+        if item.get("weight") is not None:
+            status += f"，weight={item.get('weight')}"
+        if item.get("error"):
+            status += f"，error={item.get('error')}"
+        lines.append(f"- {name}：{status}")
+    return "\n".join(lines) or "- 未提供检索路径明细"
 
 
 def _evidence_label(doc: dict[str, Any], index: int) -> str:
