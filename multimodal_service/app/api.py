@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request
 
 from .cache import ImageReferenceCache
 from .config import Settings
+from .diagnostics import score_diagnostics
 from .encoder import ChineseClipEncoder
 from .store import FaissEvidenceStore
 
@@ -62,6 +63,13 @@ def create_app(settings: Settings | None = None) -> Flask:
             "image_sha256": item["sha256"],
             "expires_in": cfg.image_ref_ttl_seconds,
             "model": cfg.model_name,
+            "dimension": encoder.dimension,
+            "processing": {
+                "operation": "image_embedding",
+                "ocr_enabled": False,
+                "vision_caption_enabled": False,
+                "persisted": False,
+            },
             "encode_ms": round((time.perf_counter() - started) * 1000, 2),
         }), 201
 
@@ -116,15 +124,16 @@ def _search_payload(
     except (TypeError, ValueError):
         requested = 20
     results = store.search(vector, max(1, min(requested, 100)))
+    scores = [float(item.get("clip_score", 0.0)) for item in results]
     return {
         "results": results,
         "count": len(results),
         "model": encoder.status(),
         "index": store.status(),
         "cache": cache.status(),
+        "diagnostics": score_diagnostics(scores),
         "search_ms": round((time.perf_counter() - started) * 1000, 2),
     }
 
 
 app = create_app()
-

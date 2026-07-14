@@ -58,8 +58,9 @@ def main() -> int:
 
 
 def _retrieval_card(title: str, topics: list[str], content: str) -> str:
-    summary = " ".join(content.replace("\n", " ").split())[:180]
-    parts = [str(title or "").strip(), "、".join(topics[:8]), summary]
+    """Build a rich card; the model tokenizer applies its own 512-token limit."""
+    normalized = " ".join(content.replace("\n", " ").split())
+    parts = [str(title or "").strip(), "、".join(topics[:8]), normalized]
     return "；".join(part for part in parts if part)
 
 

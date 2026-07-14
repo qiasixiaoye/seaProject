@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -41,6 +42,9 @@ def run(state: GeoAgentState) -> dict[str, Any]:
             "image_count": len(image_candidates),
             "text_count": info.get("text_count", 0),
             "routes": info.get("routes", []),
+            "fusion": info.get("fusion", {}),
+            "diagnostics": info.get("diagnostics", {}),
+            "candidate_preview": info.get("candidate_preview", {}),
             "multimodal_error": info.get("multimodal_error"),
         })
         return {
@@ -203,18 +207,33 @@ def _multimodal_fused_retrieve(
         for item in (image_payload.get("results") or [])
         if isinstance(item, dict)
     ]
-    fused = _rrf_fuse(text_candidates, image_candidates, recall_k)
+    original_counts = {"text": len(text_candidates), "image": len(image_candidates)}
+    text_candidates = _limit_per_document(text_candidates, max_per_doc=3)
+    image_candidates = _limit_per_document(image_candidates, max_per_doc=3)
+    diagnostics = dict(image_payload.get("diagnostics") or {})
+    route_weights = {"text": 1.0, "image": _relative_image_weight(diagnostics)}
+    fused_pool = _rrf_fuse(
+        text_candidates,
+        image_candidates,
+        min(100, recall_k * 3),
+        route_weights=route_weights,
+    )
+    fused = _limit_per_document(fused_pool, max_per_doc=3)[:recall_k]
     routes = [
         {
             "route": "text_retrieval",
             "backend": text_used,
             "count": len(text_candidates),
+            "original_count": original_counts["text"],
+            "weight": route_weights["text"],
             "queries": text_info.get("queries", []),
         },
         {
             "route": "chinese_clip_image_to_text",
             "backend": "multimodal-service",
             "count": len(image_candidates),
+            "original_count": original_counts["image"],
+            "weight": route_weights["image"],
             "model": (image_payload.get("model") or {}).get("model"),
             "index_version": (image_payload.get("index") or {}).get("index_version"),
             "error": multimodal_error or None,
@@ -224,6 +243,24 @@ def _multimodal_fused_retrieve(
     return fused, used, {
         "routes": routes,
         "text_count": len(text_candidates),
+        "fusion": {
+            "method": "confidence_aware_weighted_rrf",
+            "rrf_k": 60,
+            "weights": route_weights,
+            "per_document_cap": 3,
+            "absolute_threshold_enabled": False,
+        },
+        "diagnostics": {
+            "image_scores": diagnostics,
+            "image_search_ms": image_payload.get("search_ms"),
+            "calibration": "unvalidated",
+            "message": "图片分数仅用于相对排序；尚未使用标注集校准绝对相关阈值。",
+        },
+        "candidate_preview": {
+            "text": _candidate_preview(text_candidates),
+            "image": _candidate_preview(image_candidates),
+            "fused": _candidate_preview(fused),
+        },
         "multimodal_error": multimodal_error or None,
     }, image_candidates
 
@@ -291,8 +328,13 @@ def _rrf_fuse(
     text_candidates: list[dict[str, Any]],
     image_candidates: list[dict[str, Any]],
     limit: int,
+    route_weights: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
-    routes = [("text", text_candidates, 1.0), ("image", image_candidates, 1.15)]
+    weights = route_weights or {"text": 1.0, "image": 1.15}
+    routes = [
+        ("text", text_candidates, float(weights.get("text", 1.0))),
+        ("image", image_candidates, float(weights.get("image", 1.0))),
+    ]
     active_weight = sum(weight for _name, docs, weight in routes if docs)
     if active_weight <= 0:
         return []
@@ -300,7 +342,7 @@ def _rrf_fuse(
     for route_name, docs, weight in routes:
         for rank, source_doc in enumerate(docs, 1):
             doc = dict(source_doc)
-            key = str(doc.get("chunk_id") or doc.get("id") or doc.get("doc_id") or f"{route_name}-{rank}")
+            key = _fusion_key(doc, fallback=f"{route_name}-{rank}")
             entry = merged.setdefault(key, {"doc": doc, "rrf": 0.0, "route_ranks": {}})
             if route_name == "text" or not entry["doc"].get("abstract"):
                 preserved = entry["doc"]
@@ -321,6 +363,7 @@ def _rrf_fuse(
         metadata["fusion"] = {
             "method": "weighted_rrf",
             "route_ranks": entry["route_ranks"],
+            "route_weights": {name: weight for name, _docs, weight in routes},
             "raw_score": round(entry["rrf"], 8),
         }
         doc["metadata"] = metadata
@@ -329,6 +372,101 @@ def _rrf_fuse(
         doc["retrieval_routes"] = sorted(entry["route_ranks"])
         ranked.append(doc)
     return sorted(ranked, key=lambda item: item.get("score", 0.0), reverse=True)[:limit]
+
+
+def _relative_image_weight(diagnostics: dict[str, Any]) -> float:
+    """Scale image influence from score separation without claiming calibrated relevance."""
+    top = float(diagnostics.get("top_score") or 0.0)
+    median_value = diagnostics.get("median_score")
+    median = float(top if median_value is None else median_value)
+    std = max(0.0, float(diagnostics.get("std_score") or 0.0))
+    separation = max(0.0, top - median)
+    relative_signal = separation / (separation + 2.0 * std + 1e-8)
+    return round(0.9 + 0.3 * min(1.0, relative_signal), 4)
+
+
+def _limit_per_document(candidates: list[dict[str, Any]], max_per_doc: int) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    kept: list[dict[str, Any]] = []
+    for item in candidates:
+        key = _document_key(item)
+        if counts.get(key, 0) >= max_per_doc:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+        kept.append(item)
+    return kept
+
+
+def _fusion_key(item: dict[str, Any], fallback: str) -> str:
+    """Match the same paper page across RAGFlow and local-Faiss identifier schemes."""
+    document = _canonical_document_title(item)
+    page = _primary_page(item)
+    if document and page is not None:
+        return f"document-page:{document}:{page}"
+    return str(item.get("chunk_id") or item.get("id") or item.get("doc_id") or fallback)
+
+
+def _document_key(item: dict[str, Any]) -> str:
+    document = _canonical_document_title(item)
+    if document:
+        return f"document:{document}"
+    return str(item.get("doc_id") or item.get("source") or item.get("id") or "unknown")
+
+
+def _canonical_document_title(item: dict[str, Any]) -> str:
+    metadata = dict(item.get("metadata") or {})
+    evidence = dict(item.get("evidence") or metadata.get("evidence") or {})
+    title = str(
+        item.get("title")
+        or item.get("document_name")
+        or evidence.get("document_name")
+        or metadata.get("document_name")
+        or ""
+    )
+    title = re.sub(r"\.(?:pdf|docx?|txt|md)$", "", title.strip(), flags=re.I)
+    title = re.sub(r"\s*(?:[·/|\-]\s*)?(?:p(?:ages?)?\.?|page|页)\s*[0-9０-９,，、.．…\-–—]+.*$", "", title, flags=re.I)
+    return "".join(re.findall(r"[a-z0-9\u3400-\u9fff]+", title.lower()))
+
+
+def _primary_page(item: dict[str, Any]) -> int | None:
+    values = [item.get("page")]
+    values.extend(item.get("pages") or [])
+    metadata = dict(item.get("metadata") or {})
+    values.extend([metadata.get("page")])
+    values.extend(metadata.get("pages") or [])
+    for value in values:
+        try:
+            if value is not None and str(value).strip():
+                return int(float(value))
+        except (TypeError, ValueError):
+            continue
+    title = str(item.get("title") or "")
+    match = re.search(r"(?:p(?:ages?)?\.?|page|页)\s*([0-9０-９]+)", title, flags=re.I)
+    if match:
+        try:
+            return int(match.group(1).translate(str.maketrans("０１２３４５６７８９", "0123456789")))
+        except ValueError:
+            return None
+    return None
+
+
+def _candidate_preview(candidates: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    preview: list[dict[str, Any]] = []
+    for rank, item in enumerate(candidates[:limit], 1):
+        fusion = dict((item.get("metadata") or {}).get("fusion") or {})
+        preview.append({
+            "rank": rank,
+            "chunk_id": item.get("chunk_id") or item.get("id"),
+            "doc_id": item.get("doc_id"),
+            "title": item.get("title"),
+            "page": item.get("page"),
+            "score": round(float(item.get("score") or 0.0), 6),
+            "clip_score": item.get("clip_score"),
+            "fusion_score": item.get("fusion_score"),
+            "route_ranks": fusion.get("route_ranks") or {},
+            "routes": item.get("retrieval_routes") or [],
+        })
+    return preview
 
 
 def _safe_args(args: dict[str, Any]) -> dict[str, Any]:

@@ -354,6 +354,49 @@
         <p>{{ reportMeta }}</p>
       </div>
       <div class="auditScroll">
+        <!-- 多模态检索解释 -->
+        <div class="auditSection multimodalExplain" v-if="multimodalAudit.upload || multimodalAudit.retrieval">
+          <div class="auditSectionTitle">多模态检索解释</div>
+          <div class="mmNotice" v-if="multimodalAudit.upload">
+            <b>图片已编码，不等于图片已理解</b>
+            <span>当前使用 Chinese-CLIP 生成向量；OCR 与视觉描述尚未启用，原图不会写入向量库。</span>
+            <span>模型：{{ multimodalAudit.upload.model }}</span>
+          </div>
+          <div class="mmStats" v-if="multimodalAudit.upload">
+            <span><b>{{ multimodalAudit.upload.encode_ms }}ms</b><small>图片编码</small></span>
+            <span><b>{{ multimodalAudit.upload.dimension || 512 }}</b><small>向量维度</small></span>
+            <span><b>{{ multimodalAudit.upload.expires_in }}s</b><small>临时缓存</small></span>
+          </div>
+          <template v-if="multimodalAudit.retrieval">
+            <div class="mmRoutes">
+              <div v-for="r in (multimodalAudit.retrieval.routes || [])" :key="r.route">
+                <b>{{ r.route === 'text_retrieval' ? '文字检索' : '图片搜文' }}</b>
+                <span>保留 {{ r.count }} / 原始 {{ r.original_count ?? r.count }}</span>
+                <span>融合权重 {{ Number(r.weight || 0).toFixed(3) }}</span>
+              </div>
+            </div>
+            <div class="mmCalibration" v-if="multimodalAudit.retrieval.diagnostics">
+              <b>图片分数尚未做绝对阈值校准</b>
+              <span v-if="multimodalAudit.retrieval.diagnostics.image_scores?.top_score != null">
+                Top={{ multimodalAudit.retrieval.diagnostics.image_scores.top_score }} ·
+                中位数={{ multimodalAudit.retrieval.diagnostics.image_scores.median_score }} ·
+                Top差值={{ multimodalAudit.retrieval.diagnostics.image_scores.top_margin }} ·
+                Faiss={{ multimodalAudit.retrieval.diagnostics.image_search_ms }}ms
+              </span>
+            </div>
+            <details class="mmCandidates" v-if="multimodalAudit.retrieval.candidate_preview">
+              <summary>查看三路候选与融合排名</summary>
+              <div v-for="route in ['image','text','fused']" :key="route" class="mmCandidateGroup">
+                <b>{{ route === 'image' ? '图片召回' : (route === 'text' ? '文字召回' : '融合结果') }}</b>
+                <div v-for="d in (multimodalAudit.retrieval.candidate_preview[route] || [])" :key="route + d.chunk_id" class="mmCandidate">
+                  <span>#{{ d.rank }} {{ d.title || d.chunk_id }}</span>
+                  <small>score={{ Number(d.score || 0).toFixed(4) }}<template v-if="d.clip_score != null"> · CLIP={{ Number(d.clip_score).toFixed(4) }}</template><template v-if="d.route_ranks && Object.keys(d.route_ranks).length"> · {{ formatRouteRanks(d.route_ranks) }}</template></small>
+                </div>
+              </div>
+            </details>
+          </template>
+        </div>
+
         <!-- 质量评分 -->
         <div class="auditSection" v-if="evaluation">
           <div class="auditSectionTitle">质量评测</div>
@@ -394,6 +437,9 @@
               <b>{{ d.verdict === 'keep' ? '✓ 保留' : '· 略过' }}</b>
               {{ d.title }}
               <small>score={{ d.score }}</small>
+              <small v-if="d.route">route={{ d.route }}</small>
+              <small v-if="d.clipScore != null">CLIP={{ Number(d.clipScore).toFixed(4) }}</small>
+              <small v-if="d.reason">原因：{{ d.reason }}</small>
             </div>
           </div>
         </div>

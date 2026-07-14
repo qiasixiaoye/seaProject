@@ -41,16 +41,25 @@ def _llm_screen(
     intent: dict[str, Any],
     candidates: list[dict[str, Any]],
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    catalog = "\n".join(
-        f"[{i}] id={doc.get('id')} | 标题：{doc.get('title')} | "
-        f"摘要：{str(doc.get('abstract',''))[:250]}"
-        for i, doc in enumerate(candidates, 1)
-    )
+    catalog_lines = []
+    for i, doc in enumerate(candidates, 1):
+        fusion = dict((doc.get("metadata") or {}).get("fusion") or {})
+        catalog_lines.append(
+            f"[{i}] id={doc.get('id')} | 标题：{doc.get('title')} | "
+            f"召回路线：{','.join(doc.get('retrieval_routes') or [str(doc.get('route') or doc.get('backend') or '')])} | "
+            f"路线排名：{fusion.get('route_ranks') or {}} | "
+            f"融合分：{doc.get('fusion_score', doc.get('score', 0))} | "
+            f"CLIP分：{doc.get('clip_score', '无')} | "
+            f"摘要：{str(doc.get('abstract',''))[:320]}"
+        )
+    catalog = "\n".join(catalog_lines)
     messages = [
         {
             "role": "system",
             "content": (
                 "你是证据筛选员。判断每份文档是否与用户问题相关。"
+                "召回路线、排名和分数只代表检索信号，不是事实证据；"
+                "优先保留正文与问题直接相关且双路命中的内容，不能仅因排名高就保留。"
                 '输出 JSON：{"decisions":[{"id":...,"decision":"keep"|"pass",'
                 '"score":0~1,"reason":"..."}]}。只输出 JSON。'
             ),

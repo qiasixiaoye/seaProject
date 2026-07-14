@@ -337,6 +337,7 @@ createApp({
     domain:'auto',question:'请结合海表温度和海洋热浪知识，评估目标海域对珊瑚礁和渔业的风险，并形成规划建议',
     backend:'auto',topk:6,streaming:false,streamEs:null,
     queryImageFile:null,queryImageName:'',queryImagePreview:'',imageUploading:false,
+    multimodalAudit:{upload:null,retrieval:null},
     agentTrace:[],agentSummary:null,agentSummaryHtml:'',evidence:[],exportingPdf:false,
     evaluation:null,
     geoApiReady:false,
@@ -759,9 +760,14 @@ createApp({
       if(!q) q='请识别这张图片可能涉及的海洋对象、变量和现象，检索相关证据并说明判断依据与不确定性。';
       const attachmentName=this.queryImageName;
       let imageRef='';
+      this.multimodalAudit={upload:null,retrieval:null};
       if(this.queryImageFile){
         this.imageUploading=true;this.reportStatus='正在编码查询图片…';
-        try{imageRef=await this._uploadQueryImage();}
+        try{
+          const upload=await this._uploadQueryImage();
+          imageRef=upload.image_ref;
+          this.multimodalAudit={upload,retrieval:null};
+        }
         catch(e){
           if(!this.question.trim()){
             this.messages.push({role:'ai',text:`❌ 图片服务不可用：${e.message}`});
@@ -798,7 +804,7 @@ createApp({
       const res=await fetch('/api/multimodal/images',{method:'POST',body:fd});
       const data=await res.json();
       if(!res.ok||!data.image_ref)throw new Error(data.error||`HTTP ${res.status}`);
-      return data.image_ref;
+      return data;
     },
     async _geoStream(q,imageRef=''){
       const bbox=this.selection||{west:119,east:122,south:23,north:26};
@@ -827,8 +833,8 @@ createApp({
           const kept=p.kept_docs||p.kept_documents||[];
           const passed=p.passed_docs||p.passed_documents||[];
           this.evidence=[
-            ...kept.map(x=>({verdict:'keep',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3),route:x.route||x.metadata?.route||''})),
-            ...passed.map(x=>({verdict:'pass',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3),route:x.route||x.metadata?.route||''})),
+            ...kept.map(x=>({verdict:'keep',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3),route:(x.retrieval_routes||[x.route||x.metadata?.route]).filter(Boolean).join('+'),clipScore:x.clip_score,reason:x.reason||''})),
+            ...passed.map(x=>({verdict:'pass',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3),route:(x.retrieval_routes||[x.route||x.metadata?.route]).filter(Boolean).join('+'),clipScore:x.clip_score,reason:x.reason||''})),
           ];
         }
         else if(type==='trace'){
@@ -837,6 +843,7 @@ createApp({
             const ex=(idx!=null)?this.agentTrace.findIndex(t=>t.index===idx):-1;
             if(ex>=0) this.agentTrace.splice(ex,1,msg.item);
             else this.agentTrace.push(msg.item);
+            this._captureMultimodalTrace(msg.item);
           }
         }
         else if(type==='revision'){
@@ -848,6 +855,7 @@ createApp({
         else if(type==='done'){
           this.pipelineSteps.report='done';this.pipelineSteps.evaluator='done';
           if(msg.trace&&Array.isArray(msg.trace))this.agentTrace=msg.trace;
+          this.agentTrace.forEach(t=>this._captureMultimodalTrace(t));
           this.evaluation=msg.evaluation||null;
           const fh=this._md(buf);
           this.messages.splice(msgIdx,1,{role:'ai',html:fh});
@@ -876,6 +884,7 @@ createApp({
         const html=data.report?this._md(data.report):`<em>${data.error||'无报告'}</em>`;
         this.messages.push({role:'ai',html});this.reportHtml=html;
         if(Array.isArray(data.trace))this.agentTrace=data.trace;
+        this.agentTrace.forEach(t=>this._captureMultimodalTrace(t));
         this.evaluation=data.evaluation||null;
         this.reportMeta=`领域：${data.domain||this.domain} · 修订：${data.revisions||0}${data.evaluation?.score!=null?` · 评测：${data.evaluation.score}`:''}`;
       }catch(e){this.messages.push({role:'ai',text:`❌ ${e.message}`});}
@@ -885,6 +894,7 @@ createApp({
       if(this.streamEs){this.streamEs.close();this.streamEs=null;}
       this.streaming=false;
       this.clearQueryImage();
+      this.multimodalAudit={upload:null,retrieval:null};
       this.messages=[{role:'ai',text:'对话已清空。'}];
       this.reportHtml='';this.agentTrace=[];this.evidence=[];
       this.agentSummary=null;this.agentSummaryHtml='';
@@ -965,6 +975,15 @@ createApp({
     formatDetails(d){
       try{let s=JSON.stringify(d,null,2);return s.length>1200?s.slice(0,1200)+'\n…':s;}
       catch{return String(d);}
+    },
+    formatRouteRanks(ranks){
+      return Object.entries(ranks||{}).map(([route,rank])=>`${route}#${rank}`).join(' · ');
+    },
+    _captureMultimodalTrace(item){
+      if(!item||item.node!=='RetrievalNode'||item.mode!=='multimodal-fusion')return;
+      const outer=item.details||{};
+      const details=outer.details||outer;
+      this.multimodalAudit={...this.multimodalAudit,retrieval:details};
     },
 
     // ── 导出 PDF 报告（前端 html2canvas + jsPDF） ──────────────────────────────
