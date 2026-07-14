@@ -240,6 +240,7 @@ def get_graph():
 
 def run(
     question: str,
+    image_ref: str | None = None,
     bbox: dict[str, float] | None = None,
     domain: str | None = None,
     variables: list[str] | None = None,
@@ -254,6 +255,7 @@ def run(
 
     Args:
         question: 用户问题
+        image_ref: 多模态服务中的短期图片引用
         bbox: 框选区域 {west, east, south, north}
         domain: 强制指定领域（留空自动检测）
         variables: 用户指定的 NC 变量名
@@ -294,6 +296,7 @@ def run(
 
     initial_state: GeoAgentState = {
         "question": question,
+        "image_ref": str(image_ref or "").strip(),
         "bbox": bbox or None,
         "domain": domain or "",
         "variables": variables or [],

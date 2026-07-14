@@ -13,6 +13,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from geo_agent import graph as geo_graph
+from geo_agent import multimodal_client
 from geo_agent.catalog import agent_card, agent_catalog
 from ocean_agents_demo import deepseek_client
 from ocean_agents_demo.core import clear_doc_cache, rag_status, run_pipeline
@@ -40,6 +41,8 @@ DB_PATH = INSTANCE_DIR / "ocean_demo.sqlite3"
 ALLOWED_UPLOAD_EXTS = {".pdf", ".md", ".txt", ".json"}
 ALLOWED_DATA_UPLOAD_EXTS = SUPPORTED_DATA_EXTS
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
+ALLOWED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
 def create_app() -> Flask:
@@ -256,6 +259,33 @@ def create_app() -> Flask:
     def rag_info() -> Any:
         return jsonify(rag_status())
 
+    @app.get("/api/multimodal/status")
+    def multimodal_status() -> Any:
+        return jsonify(multimodal_client.service_status())
+
+    @app.post("/api/multimodal/images")
+    def multimodal_image_upload() -> Any:
+        file = request.files.get("image")
+        if file is None or not file.filename:
+            return jsonify({"error": "image file is required"}), 400
+        extension = Path(file.filename).suffix.lower()
+        filename = secure_filename(file.filename) or f"image{extension}"
+        if extension not in ALLOWED_IMAGE_EXTS:
+            return jsonify({"error": f"unsupported image type: {extension}"}), 400
+        raw = file.read(MAX_IMAGE_UPLOAD_BYTES + 1)
+        if len(raw) > MAX_IMAGE_UPLOAD_BYTES:
+            return jsonify({"error": f"image exceeds {MAX_IMAGE_UPLOAD_BYTES} bytes"}), 413
+        try:
+            result = multimodal_client.upload_image(raw, filename, file.mimetype or "")
+            log_query("multimodal_image", {
+                "filename": filename,
+                "size": len(raw),
+                "image_sha256": result.get("image_sha256"),
+            })
+            return jsonify(result), 201
+        except multimodal_client.MultimodalServiceError as exc:
+            return jsonify({"error": str(exc), "degraded": True}), 503
+
     @app.get("/api/rag/documents")
     def rag_documents() -> Any:
         """返回本地知识库文档列表 + RAGFlow 文档列表。"""
@@ -393,6 +423,7 @@ def create_app() -> Flask:
             payload = request.get_json(silent=True) or {}
             result = geo_graph.run(
                 question=str(payload.get("question", "")).strip(),
+                image_ref=str(payload.get("image_ref", "")).strip() or None,
                 bbox=payload.get("bbox") or payload.get("region"),
                 domain=payload.get("domain"),
                 variables=payload.get("variables") or [],
@@ -481,6 +512,7 @@ def _safe_payload(payload: dict) -> dict:
     safe = dict(payload)
     safe.pop("api_key", None)
     safe.pop("password", None)
+    safe.pop("image_ref", None)
     return safe
 
 

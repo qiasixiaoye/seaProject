@@ -24,6 +24,32 @@ def run(state: GeoAgentState) -> dict[str, Any]:
     backend = state.get("backend", "auto")
     domain = state.get("domain", "general")
     trace = list(state.get("trace", []))
+    image_ref = str(state.get("image_ref") or "").strip()
+
+    if image_ref:
+        candidates, used, info, image_candidates = _multimodal_fused_retrieve(
+            intent=intent,
+            top_k=top_k,
+            backend=backend,
+            image_ref=image_ref,
+        )
+        trace.append({
+            "node": "RetrievalNode",
+            "mode": "multimodal-fusion",
+            "count": len(candidates),
+            "backend": used,
+            "image_count": len(image_candidates),
+            "text_count": info.get("text_count", 0),
+            "routes": info.get("routes", []),
+            "multimodal_error": info.get("multimodal_error"),
+        })
+        return {
+            "candidates": candidates,
+            "multimodal_candidates": image_candidates,
+            "retrieval_routes": info.get("routes", []),
+            "backend_used": used,
+            "trace": trace,
+        }
 
     if llm.configured():
         try:
@@ -138,6 +164,171 @@ def _tool_loop_retrieve(
     )
     candidates = sorted(collected.values(), key=lambda d: d.score, reverse=True)[:top_k]
     return candidates, backend_ref["v"], {"queries": queries_used, "tool_calls": tool_calls}
+
+
+def _multimodal_fused_retrieve(
+    intent: dict[str, Any],
+    top_k: int,
+    backend: str,
+    image_ref: str,
+) -> tuple[list[dict[str, Any]], str, dict[str, Any], list[dict[str, Any]]]:
+    """Retrieve image and text evidence in parallel, then fuse by reciprocal rank."""
+    from concurrent.futures import ThreadPoolExecutor
+    from geo_agent import multimodal_client
+
+    recall_k = max(top_k, min(30, top_k * 3))
+    text_docs: list[Any] = []
+    text_used = "local"
+    text_info: dict[str, Any] = {}
+    image_payload: dict[str, Any] = {}
+    multimodal_error = ""
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        text_future = pool.submit(_deterministic_retrieve, intent, recall_k, backend)
+        image_future = pool.submit(multimodal_client.search_by_ref, image_ref, recall_k)
+        try:
+            text_docs, text_used, text_info = text_future.result()
+        except Exception as exc:
+            log.warning("text retrieval during multimodal query failed: %s", exc)
+            text_info = {"error": f"{type(exc).__name__}: {exc}"}
+        try:
+            image_payload = image_future.result()
+        except Exception as exc:
+            multimodal_error = f"{type(exc).__name__}: {exc}"
+            log.warning("multimodal retrieval degraded to text-only: %s", exc)
+
+    text_candidates = [_doc_to_dict(doc) for doc in text_docs]
+    image_candidates = [
+        _normalize_multimodal_hit(item, image_payload)
+        for item in (image_payload.get("results") or [])
+        if isinstance(item, dict)
+    ]
+    fused = _rrf_fuse(text_candidates, image_candidates, recall_k)
+    routes = [
+        {
+            "route": "text_retrieval",
+            "backend": text_used,
+            "count": len(text_candidates),
+            "queries": text_info.get("queries", []),
+        },
+        {
+            "route": "chinese_clip_image_to_text",
+            "backend": "multimodal-service",
+            "count": len(image_candidates),
+            "model": (image_payload.get("model") or {}).get("model"),
+            "index_version": (image_payload.get("index") or {}).get("index_version"),
+            "error": multimodal_error or None,
+        },
+    ]
+    used = f"{text_used}+multimodal" if image_candidates else text_used
+    return fused, used, {
+        "routes": routes,
+        "text_count": len(text_candidates),
+        "multimodal_error": multimodal_error or None,
+    }, image_candidates
+
+
+def _normalize_multimodal_hit(item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    doc_id = str(item.get("doc_id") or item.get("evidence_id") or item.get("vector_id"))
+    chunk_id = str(item.get("chunk_id") or item.get("evidence_id") or doc_id)
+    content = str(item.get("content") or item.get("abstract") or item.get("retrieval_card") or "")
+    clip_score = float(item.get("clip_score") or item.get("score") or 0.0)
+    pages = item.get("pages") or ([item.get("page")] if item.get("page") else [])
+    route = {
+        "route": "chinese_clip_image_to_text",
+        "backend": "multimodal-service",
+        "rank": int(item.get("rank") or 0),
+        "score": round(clip_score, 6),
+    }
+    evidence = {
+        "schema_version": "evidence_chunk.v1",
+        "doc_id": doc_id,
+        "chunk_id": chunk_id,
+        "document_name": str(item.get("document_name") or item.get("title") or doc_id),
+        "title": str(item.get("title") or doc_id),
+        "source": str(item.get("source") or ""),
+        "source_path": str(item.get("source_path") or item.get("source") or ""),
+        "page": item.get("page"),
+        "pages": pages,
+        "content_type": str(item.get("content_type") or "multimodal_text"),
+        "backend": "multimodal-service",
+        "route": route["route"],
+        "similarity": clip_score,
+        "vector_similarity": clip_score,
+        "routes": [route],
+    }
+    metadata = dict(item.get("metadata") or {})
+    metadata.update(evidence)
+    metadata.update({
+        "clip_score": clip_score,
+        "model": (payload.get("model") or {}).get("model"),
+        "index_version": (payload.get("index") or {}).get("index_version"),
+        "evidence": evidence,
+    })
+    return {
+        "id": chunk_id,
+        "doc_id": doc_id,
+        "chunk_id": chunk_id,
+        "title": str(item.get("title") or doc_id),
+        "kind": "multimodal_text_hit",
+        "year": int(item.get("year") or 0),
+        "source": str(item.get("source") or ""),
+        "topics": list(item.get("topics") or []),
+        "abstract": content,
+        "score": clip_score,
+        "backend": "multimodal-service",
+        "reason": "Chinese-CLIP image-to-text recall",
+        "page": item.get("page"),
+        "pages": pages,
+        "route": route["route"],
+        "clip_score": clip_score,
+        "metadata": metadata,
+        "evidence": evidence,
+    }
+
+
+def _rrf_fuse(
+    text_candidates: list[dict[str, Any]],
+    image_candidates: list[dict[str, Any]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    routes = [("text", text_candidates, 1.0), ("image", image_candidates, 1.15)]
+    active_weight = sum(weight for _name, docs, weight in routes if docs)
+    if active_weight <= 0:
+        return []
+    merged: dict[str, dict[str, Any]] = {}
+    for route_name, docs, weight in routes:
+        for rank, source_doc in enumerate(docs, 1):
+            doc = dict(source_doc)
+            key = str(doc.get("chunk_id") or doc.get("id") or doc.get("doc_id") or f"{route_name}-{rank}")
+            entry = merged.setdefault(key, {"doc": doc, "rrf": 0.0, "route_ranks": {}})
+            if route_name == "text" or not entry["doc"].get("abstract"):
+                preserved = entry["doc"]
+                entry["doc"] = doc
+                if preserved.get("clip_score") is not None:
+                    entry["doc"]["clip_score"] = preserved["clip_score"]
+            elif doc.get("clip_score") is not None:
+                entry["doc"]["clip_score"] = doc["clip_score"]
+            entry["rrf"] += weight / (60.0 + rank)
+            entry["route_ranks"][route_name] = rank
+
+    max_rrf = active_weight / 61.0
+    ranked: list[dict[str, Any]] = []
+    for entry in merged.values():
+        doc = dict(entry["doc"])
+        score = min(1.0, entry["rrf"] / max_rrf)
+        metadata = dict(doc.get("metadata") or {})
+        metadata["fusion"] = {
+            "method": "weighted_rrf",
+            "route_ranks": entry["route_ranks"],
+            "raw_score": round(entry["rrf"], 8),
+        }
+        doc["metadata"] = metadata
+        doc["score"] = round(score, 6)
+        doc["fusion_score"] = round(score, 6)
+        doc["retrieval_routes"] = sorted(entry["route_ranks"])
+        ranked.append(doc)
+    return sorted(ranked, key=lambda item: item.get("score", 0.0), reverse=True)[:limit]
 
 
 def _safe_args(args: dict[str, Any]) -> dict[str, Any]:

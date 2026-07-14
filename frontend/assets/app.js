@@ -336,6 +336,7 @@ createApp({
     messages:[{role:'ai',text:'可以询问海洋热浪、酸化、渔业风险，框选区域后 AI 会自动获取数据。'}],
     domain:'auto',question:'请结合海表温度和海洋热浪知识，评估目标海域对珊瑚礁和渔业的风险，并形成规划建议',
     backend:'auto',topk:6,streaming:false,streamEs:null,
+    queryImageFile:null,queryImageName:'',queryImagePreview:'',imageUploading:false,
     agentTrace:[],agentSummary:null,agentSummaryHtml:'',evidence:[],exportingPdf:false,
     evaluation:null,
     geoApiReady:false,
@@ -754,18 +755,55 @@ createApp({
 
     // ── Chat / SSE ──
     async sendQuery(){
-      const q=this.question.trim();if(!q||this.streaming)return;
-      this.messages.push({role:'user',text:q});
+      let q=this.question.trim();if((!q&&!this.queryImageFile)||this.streaming||this.imageUploading)return;
+      if(!q) q='请识别这张图片可能涉及的海洋对象、变量和现象，检索相关证据并说明判断依据与不确定性。';
+      const attachmentName=this.queryImageName;
+      let imageRef='';
+      if(this.queryImageFile){
+        this.imageUploading=true;this.reportStatus='正在编码查询图片…';
+        try{imageRef=await this._uploadQueryImage();}
+        catch(e){
+          if(!this.question.trim()){
+            this.messages.push({role:'ai',text:`❌ 图片服务不可用：${e.message}`});
+            this.reportStatus='图片上传失败。';this.imageUploading=false;return;
+          }
+          this.messages.push({role:'ai',html:`<em>图片检索暂不可用，已降级为文字检索：${this.escapeHtml(e.message)}</em>`});
+        }finally{this.imageUploading=false;}
+      }
+      const attachment=attachmentName?`<span class="messageAttachment">🖼 ${this.escapeHtml(attachmentName)}</span>`:'';
+      this.messages.push({role:'user',html:`${attachment}<div>${this.escapeHtml(q)}</div>`});
       this.streaming=true;this.reportStatus='分析中…';
       this.agentTrace=[];this.evidence=[];
       this.evaluation=null;
       Object.keys(this.pipelineSteps).forEach(k=>{this.pipelineSteps[k]='';});
-      if(this.geoApiReady) await this._geoStream(q);
-      else                 await this._legacyAsk(q);
+      this.clearQueryImage();
+      if(this.geoApiReady) await this._geoStream(q,imageRef);
+      else                 await this._legacyAsk(q,imageRef);
     },
-    async _geoStream(q){
+    onQueryImageChange(event){
+      const file=event.target.files&&event.target.files[0];
+      if(!file)return;
+      if(file.size>10*1024*1024){alert('图片不能超过 10MB。');event.target.value='';return;}
+      if(!/^image\/(png|jpeg|webp|bmp)$/.test(file.type)){alert('仅支持 PNG、JPEG、WebP、BMP。');event.target.value='';return;}
+      if(this.queryImagePreview)URL.revokeObjectURL(this.queryImagePreview);
+      this.queryImageFile=file;this.queryImageName=file.name;this.queryImagePreview=URL.createObjectURL(file);
+    },
+    clearQueryImage(){
+      if(this.queryImagePreview)URL.revokeObjectURL(this.queryImagePreview);
+      this.queryImageFile=null;this.queryImageName='';this.queryImagePreview='';
+      if(this.$refs.queryImageInput)this.$refs.queryImageInput.value='';
+    },
+    async _uploadQueryImage(){
+      const fd=new FormData();fd.append('image',this.queryImageFile,this.queryImageFile.name);
+      const res=await fetch('/api/multimodal/images',{method:'POST',body:fd});
+      const data=await res.json();
+      if(!res.ok||!data.image_ref)throw new Error(data.error||`HTTP ${res.status}`);
+      return data.image_ref;
+    },
+    async _geoStream(q,imageRef=''){
       const bbox=this.selection||{west:119,east:122,south:23,north:26};
       const params=new URLSearchParams({question:q,domain:this.domain,bbox:JSON.stringify(bbox)});
+      if(imageRef)params.set('image_ref',imageRef);
       if(this.streamEs)this.streamEs.close();
       const es=new EventSource(`/geo-api/api/geo/stream?${params}`);
       this.streamEs=es;
@@ -789,8 +827,8 @@ createApp({
           const kept=p.kept_docs||p.kept_documents||[];
           const passed=p.passed_docs||p.passed_documents||[];
           this.evidence=[
-            ...kept.map(x=>({verdict:'keep',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3)})),
-            ...passed.map(x=>({verdict:'pass',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3)})),
+            ...kept.map(x=>({verdict:'keep',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3),route:x.route||x.metadata?.route||''})),
+            ...passed.map(x=>({verdict:'pass',title:x.title||x.content?.slice(0,60)||'—',score:(x.decision_score||x.score||0).toFixed(3),route:x.route||x.metadata?.route||''})),
           ];
         }
         else if(type==='trace'){
@@ -828,11 +866,11 @@ createApp({
         this.streaming=false;this.reportStatus='连接失败。';es.close();
       };
     },
-    async _legacyAsk(q){
+    async _legacyAsk(q,imageRef=''){
       try{
         const res=await fetch('/api/agents/report',{
           method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({question:q,top_k:this.topk,backend:this.backend,domain:this.domain,region:this.selection,trace:true}),
+          body:JSON.stringify({question:q,image_ref:imageRef||undefined,top_k:this.topk,backend:this.backend,domain:this.domain,region:this.selection,trace:true}),
         });
         const data=await res.json();
         const html=data.report?this._md(data.report):`<em>${data.error||'无报告'}</em>`;
@@ -846,6 +884,7 @@ createApp({
     clearChat(){
       if(this.streamEs){this.streamEs.close();this.streamEs=null;}
       this.streaming=false;
+      this.clearQueryImage();
       this.messages=[{role:'ai',text:'对话已清空。'}];
       this.reportHtml='';this.agentTrace=[];this.evidence=[];
       this.agentSummary=null;this.agentSummaryHtml='';

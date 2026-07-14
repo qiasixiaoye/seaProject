@@ -15,6 +15,8 @@ services:
       RAGFLOW_BASE_URL: ${RAGFLOW_BASE_URL:-http://host.docker.internal:9380}
       RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:-}
       RAGFLOW_DATASET_IDS: ${RAGFLOW_DATASET_IDS:-}
+      MULTIMODAL_BASE_URL: http://multimodal-retrieval:8001
+      MULTIMODAL_TIMEOUT_SECONDS: ${MULTIMODAL_TIMEOUT_SECONDS:-30}
     volumes:
       - ./data:/app/data
       - ./instance:/app/instance
@@ -23,6 +25,51 @@ services:
     expose:
       - "5000"
     restart: unless-stopped
+
+  multimodal-retrieval:
+    build:
+      context: .
+      dockerfile: multimodal_service/Dockerfile
+    container_name: ocean-multimodal-retrieval
+    environment:
+      MULTIMODAL_MODEL_NAME: ${MULTIMODAL_MODEL_NAME:-OFA-Sys/chinese-clip-vit-base-patch16}
+      MULTIMODAL_DEVICE: ${MULTIMODAL_DEVICE:-cpu}
+      MULTIMODAL_INDEX_DIR: /app/index
+      MULTIMODAL_MODEL_CACHE: /app/models
+      MULTIMODAL_LOCAL_FILES_ONLY: ${MULTIMODAL_LOCAL_FILES_ONLY:-false}
+    volumes:
+      - ./data/multimodal_index:/app/index:ro
+      - multimodal-model-cache:/app/models
+    expose:
+      - "8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  multimodal-index-builder:
+    profiles: ["indexing"]
+    build:
+      context: .
+      dockerfile: multimodal_service/Dockerfile
+    environment:
+      MULTIMODAL_MODEL_NAME: ${MULTIMODAL_MODEL_NAME:-OFA-Sys/chinese-clip-vit-base-patch16}
+      MULTIMODAL_DEVICE: ${MULTIMODAL_DEVICE:-cpu}
+      MULTIMODAL_MODEL_CACHE: /app/models
+      MULTIMODAL_LOCAL_FILES_ONLY: ${MULTIMODAL_LOCAL_FILES_ONLY:-false}
+    volumes:
+      - ./data/multimodal_index:/app/index
+      - multimodal-model-cache:/app/models
+    command:
+      - python
+      - -m
+      - multimodal_service.scripts.build_index
+      - --input
+      - /app/index/evidence-source.jsonl
+      - --output-dir
+      - /app/index
 
   # ── GeoAgent v2 API（新架构，SSE流式 + 4领域） ─────────────────────────
   geo-api:
@@ -40,6 +87,8 @@ services:
       RAGFLOW_BASE_URL: ${RAGFLOW_BASE_URL:-http://host.docker.internal:9380}
       RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:-}
       RAGFLOW_DATASET_IDS: ${RAGFLOW_DATASET_IDS:-}
+      MULTIMODAL_BASE_URL: http://multimodal-retrieval:8001
+      MULTIMODAL_TIMEOUT_SECONDS: ${MULTIMODAL_TIMEOUT_SECONDS:-30}
     volumes:
       - ./data:/app/data
     extra_hosts:
@@ -78,3 +127,6 @@ services:
 networks:
   default:
     name: ocean-demo-net
+
+volumes:
+  multimodal-model-cache:

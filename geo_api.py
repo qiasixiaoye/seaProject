@@ -193,6 +193,7 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
         bbox = body.get("bbox") or body.get("region")
         domain = body.get("domain") or None
         variables = body.get("variables") or []
+        image_ref = str(body.get("image_ref") or "").strip() or None
         backend = body.get("backend", "auto")
         top_k = int(body.get("top_k", 6))
         threshold = float(body.get("threshold", 0.22))
@@ -203,6 +204,7 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
         try:
             result = geo_graph.run(
                 question=question,
+                image_ref=image_ref,
                 bbox=bbox,
                 domain=domain,
                 variables=variables,
@@ -236,6 +238,7 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
         bbox = body.get("bbox") or body.get("region")
         domain = body.get("domain") or None
         variables = body.get("variables") or []
+        image_ref = str(body.get("image_ref") or "").strip()
         backend = body.get("backend", "auto")
         top_k = int(body.get("top_k", 6))
         threshold = float(body.get("threshold", 0.22))
@@ -275,6 +278,7 @@ class GeoAPIHandler(BaseHTTPRequestHandler):
 
             state = {
                 "question": question,
+                "image_ref": image_ref,
                 "bbox": bbox,
                 "domain": domain or "",
                 "variables": variables,

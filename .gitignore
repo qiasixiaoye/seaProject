@@ -25,6 +25,10 @@ server.out.log
 data/pdf_reports/**/*.pdf
 data/pdf_reports/*.pdf
 data/nc_uploads/*.nc
+data/multimodal_index/*.faiss
+data/multimodal_index/*.jsonl
+data/multimodal_index/manifest.json
+multimodal_service/.model-cache/
 
 # Cowork 临时目录
 seaProject/

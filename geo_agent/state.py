@@ -82,6 +82,7 @@ class BBox(TypedDict, total=False):
 class GeoAgentState(TypedDict, total=False):
     # ── 输入 ──────────────────────────────────────────────────
     question: str
+    image_ref: str               # 多模态服务中的短期图片引用，可选
     bbox: Optional[BBox]
     variables: list[str]          # 用户指定的 NC 变量名
     backend: str                  # "auto" | "local" | "ragflow"
@@ -98,6 +99,8 @@ class GeoAgentState(TypedDict, total=False):
 
     # ── 检索层（RetrievalNode + ContextNode，可并行） ──────────
     candidates: list[dict[str, Any]]   # 候选文档（Doc 序列化为 dict）
+    multimodal_candidates: list[dict[str, Any]]
+    retrieval_routes: list[dict[str, Any]]
     backend_used: str
     ocean_data: dict[str, Any]         # NetCDF 区域统计
     data_context: dict[str, Any]       # DataAgent 数值质量摘要

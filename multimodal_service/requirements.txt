@@ -1,0 +1,6 @@
+Flask==3.0.3
+gunicorn==22.0.0
+numpy>=1.26,<3
+Pillow>=10.3,<12
+transformers>=4.48,<5
+faiss-cpu>=1.8,<2

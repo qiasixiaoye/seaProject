@@ -19,6 +19,7 @@
 - 渲染分类：按变量类型限制渲染方式，避免用标量数据伪造粒子流。
 - 陆地掩膜：使用 ETOPO 2022 高分辨率地形/水深数据做 land mask，海洋变量落到陆地区域时返回 `null`，前端不渲染。
 - RAG 检索：RAGFlow 优先，本地知识库回退，保证 demo 在离线或 RAGFlow 未配置时仍能运行。
+- 多模态检索：可选上传海洋科研图，由独立 Chinese-CLIP + Faiss 服务召回文本证据，并与文字 RAG 融合。
 - 多 Agent 报告：Intent、Retrieval、Context、Screening、Reasoning、Report、Critic 组成可追踪报告流水线。
 - 证据链展示：前端显示 Agent trace、保留/过滤证据、来源文档、页码、知识库来源和 Critic 结果。
 - 工程化部署：Nginx、Flask/Gunicorn、GeoServer、SQLite、Docker Compose。
@@ -81,6 +82,15 @@ $env:COMPOSE_DOCKER_CLI_BUILD='1'
 
 docker compose up -d --build
 ```
+
+首次启用图片检索前，需要导出证据并构建 Faiss 索引：
+
+```powershell
+python scripts\export_multimodal_evidence.py --parse-pdf --output data\multimodal_index\evidence-source.jsonl
+docker compose --profile indexing run --rm multimodal-index-builder
+```
+
+一次性建库任务以可写方式挂载 `data/multimodal_index`，在线服务保持只读挂载。模型权重首次使用时下载到 `multimodal-model-cache`。未构建索引或服务不可用时，带文字的问题会自动降级到原有文本 RAG。
 
 启动 RAGFlow：
 

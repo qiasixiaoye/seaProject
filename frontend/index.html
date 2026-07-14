@@ -317,9 +317,22 @@
         </div>
         <textarea v-model="question" @keydown.ctrl.enter="sendQuery" @keydown.meta.enter="sendQuery"
           placeholder="输入海洋相关问题... (Ctrl+Enter 发送)"></textarea>
+        <div class="queryImagePreview" v-if="queryImagePreview">
+          <img :src="queryImagePreview" alt="查询图片预览">
+          <div>
+            <strong>{{ queryImageName }}</strong>
+            <small>图片将与文字问题共同参与检索</small>
+          </div>
+          <button type="button" @click="clearQueryImage" :disabled="streaming">移除</button>
+        </div>
         <div class="aiInputBtns">
-          <button class="primary" :disabled="streaming" @click="sendQuery">
-            {{ streaming ? '分析中…' : '发送' }}
+          <label class="imageAttachBtn" :class="{ disabled: streaming || imageUploading }">
+            <input ref="queryImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/bmp"
+              @change="onQueryImageChange" :disabled="streaming || imageUploading">
+            添加图片
+          </label>
+          <button class="primary" :disabled="streaming || imageUploading" @click="sendQuery">
+            {{ imageUploading ? '图片编码中…' : (streaming ? '分析中…' : '发送') }}
           </button>
           <button class="secondary" @click="clearChat">清空</button>
         </div>
